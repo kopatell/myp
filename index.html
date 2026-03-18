@@ -85,13 +85,15 @@
         
         /* Стили контейнера плеера */
         #player-container { 
-            width: 100%; 
+            width: 30%; /* Ширина плеера на десктопе */
+            margin-left: 20%; /* Отступ (ширина первой колонки) */
             background: #000; 
-            display: none; /* Скрыт по умолчанию */
+            display: none; 
             line-height: 0; 
             border-bottom: 1px solid #222;
             flex-shrink: 0;
             position: relative;
+            z-index: 100;
         }
         
         /* Кнопка остановки */
@@ -99,7 +101,7 @@
             position: absolute;
             top: 10px;
             right: 10px;
-            z-index: 20;
+            z-index: 120;
             padding: 5px 12px;
             background: rgba(244, 67, 54, 0.8);
             color: white;
@@ -121,13 +123,29 @@
             border-left: 4px solid var(--accent) !important;
         }
         .channel-item.is-playing .ch-name { color: var(--accent); }
+
         #main-video { 
-            width: 100%; /* Теперь занимает всю ширину своей 30% колонки */
+            width: 100%; 
             aspect-ratio: 16 / 9; 
             background: #000;
             outline: none;
             display: block;
         }
+
+        /* Адаптация для мобильных устройств */
+        @media (max-width: 768px) {
+            #player-container { 
+                width: 100% !important; 
+                margin-left: 0 !important; 
+                position: sticky;
+                top: 0;
+            }
+            .main-layout {
+                flex-direction: row !important; /* Важно для работы жестов свайпа */
+                width: 300vw; /* Колонки выстраиваются в ряд для перелистывания */
+            }
+            .col-channels, .col-schedule, .col-details {
+                width: 100vw !import
 
         .prog-item { padding: 15px; border-bottom: 1px solid #1c1f24; position: relative; }
         .prog-item.active-now { background: rgba(79, 172, 254, 0.1); border-left: 4px solid var(--accent); }
@@ -214,6 +232,11 @@
             <div class="selector" id="btn-to-settings" style="padding: 5px 15px; background: var(--surface); border-radius: 6px;">⚙ Настройки</div>
         </header>
 
+        <div id="player-container">
+            <div id="btn-stop-player" class="selector">✖ ОСТАНОВИТЬ</div>
+            <video id="main-video" controls autoplay class="selector"></video>
+        </div>
+
         <div class="main-layout">
             <!-- Колонки -->
             <div class="col-channels">
@@ -221,10 +244,6 @@
             </div>
             
             <div class="col-schedule">
-                <div id="player-container">
-                    <div id="btn-stop-player" class="selector">✖ ОСТАНОВИТЬ</div>
-                    <video id="main-video" controls autoplay class="selector"></video>
-                </div>
                 <div class="scrollable" id="list-schedule"></div>
             </div>
 
@@ -258,6 +277,7 @@ const App = {
 
     async init() {
         Nav.init();
+        this.initTouchGestures();
 
         // Регистрация Service Worker для обхода Referer/User-Agent
         if ('serviceWorker' in navigator) {
@@ -329,6 +349,30 @@ const App = {
     goBack() {
         if (this.currentView === 'details') this.setMobileView('schedule');
         else if (this.currentView === 'schedule') this.setMobileView('channels');
+    },
+
+    initTouchGestures() {
+        let touchStartX = 0;
+        const layout = document.querySelector('.main-layout');
+
+        layout.addEventListener('touchstart', (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+        }, { passive: true });
+
+        layout.addEventListener('touchend', (e) => {
+            const touchEndX = e.changedTouches[0].screenX;
+            const diff = touchStartX - touchEndX;
+
+            if (Math.abs(diff) > 80) { // Порог свайпа 80 пикселей
+                if (diff > 0) { // Свайп влево -> Вперед
+                    if (this.currentView === 'channels') this.setMobileView('schedule');
+                    else if (this.currentView === 'schedule') this.setMobileView('details');
+                } else { // Свайп вправо -> Назад
+                    if (this.currentView === 'details') this.setMobileView('schedule');
+                    else if (this.currentView === 'schedule') this.setMobileView('channels');
+                }
+            }
+        }, { passive: true });
     },
 
     async loadData() {
