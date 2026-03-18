@@ -1,52 +1,52 @@
 /**
- * Service Worker для подмены заголовков IPTV потоков
+ * Умный Service Worker для обхода ограничений IPTV (Referer/Origin/UA)
+ * Поддерживает авто-определение разделителей | и %7C
  */
 
-self.addEventListener('install', (event) => {
-    // Немедленная активация при установке
-    self.skipWaiting();
-});
-
-self.addEventListener('activate', (event) => {
-    // Берем под контроль все открытые вкладки сразу
-    event.waitUntil(clients.claim());
-});
+self.addEventListener('install', (e) => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));
 
 self.addEventListener('fetch', (event) => {
-    const url = event.request.url;
+    let url = event.request.url;
 
-    // Перехватываем только те запросы, где есть знак трубы "|"
-    if (url.includes('|')) {
-        const parts = url.split('|');
-        const targetUrl = parts[0];
+    // Проверяем наличие разделителя (обычного или закодированного)
+    if (url.includes('|') || url.includes('%7C')) {
+        // Заменяем %7C на | для удобства обработки
+        const cleanUrl = url.replace(/%7C/g, '|');
+        const parts = cleanUrl.split('|');
         
-        // Очищаем параметры заголовков от возможных html-сущностей
+        const targetUrl = parts[0]; // Чистая ссылка на видео
         const rawParams = parts[1].replace(/&amp;/g, '&');
         const headerParams = new URLSearchParams(rawParams);
 
-        // Клонируем исходные заголовки запроса
+        // Создаем объект заголовков
         const newHeaders = new Headers(event.request.headers);
 
-        // Переносим данные из ссылки в HTTP-заголовки
+        // Автоматически переносим ВСЕ параметры из ссылки в заголовки запроса
         headerParams.forEach((value, key) => {
-            // Service Worker имеет право перезаписывать Referer и User-Agent
-            newHeaders.set(key, value);
+            // Переводим ключи в правильный регистр (напр. user-agent -> User-Agent)
+            const normalizedKey = key.split('-').map(word => 
+                word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+            ).join('-');
+            
+            newHeaders.set(normalizedKey, value);
         });
 
-        // Формируем новый запрос к серверу провайдера
+        // Формируем модифицированный запрос
+        // Используем mode: 'cors' для имитации обычного браузерного запроса
         const modifiedRequest = new Request(targetUrl, {
+            method: event.request.method,
             headers: newHeaders,
-            mode: 'cors',
+            mode: 'cors', 
             credentials: 'omit',
             referrerPolicy: 'no-referrer'
         });
 
-        // Отправляем модифицированный запрос и возвращаем ответ плееру
         event.respondWith(
             fetch(modifiedRequest).catch(err => {
-                console.error('Ошибка Service Worker при запросе потока:', err);
-                // Если произошла ошибка, пробуем запросить как есть
-                return fetch(event.request);
+                console.error('SW Fetch Error:', err);
+                // Если произошла ошибка CORS, пробуем запросить без доп. параметров
+                return fetch(targetUrl);
             })
         );
     }
