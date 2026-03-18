@@ -77,8 +77,10 @@
                 left: 20%; /* Ширина первой колонки */
                 width: 30%; /* Ширина второй колонки */
             }
-            /* Создаем отступ в списке передач, чтобы видео его не закрывало */
-            .col-schedule { padding-top: calc(30vw * 0.5625); } 
+            /* Создаем отступ в списке передач только когда плеер активен */
+            .main-layout.player-active .col-schedule { 
+                padding-top: calc(30vw * 0.5625); 
+            } 
         }
 
         /* Колонка 1: Список каналов (Узкая) */
@@ -1007,9 +1009,11 @@ const Player = {
         const video = document.getElementById('main-video');
         if (!video) return;
 
-        // Показываем контейнер плеера
+        // Показываем контейнер плеера и ставим метку активности
         const container = document.getElementById('player-container');
+        const layout = document.querySelector('.main-layout');
         if (container) container.style.display = 'block';
+        if (layout) layout.classList.add('player-active');
 
         this.lastUrl = url;
         
@@ -1074,9 +1078,11 @@ const Player = {
             video.load();
         }
         
-        // Скрываем контейнер плеера
+        // Скрываем контейнер плеера и убираем метку активности
         const container = document.getElementById('player-container');
+        const layout = document.querySelector('.main-layout');
         if (container) container.style.display = 'none';
+        if (layout) layout.classList.remove('player-active');
     }
 };
 
