@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>IPTV EPG Guide</title>
+    <!-- Плееры для HLS (.m3u8), DASH (.mpd) и MPEG-TS/FLV (.ts) -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.7.4/dash.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f1114;
+            --surface: #1a1d23;
+            --surface-hover: #2a2e37;
+            --accent: #4facfe;
+            --text: #ffffff;
+            --text-muted: #a0a0a0;
+            --focus-border: #ffffff;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body { 
+            background: var(--bg); 
+            color: var(--text-muted); 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            overflow: hidden; 
+            height: 100vh;
+        }
+
+        /* Общие стили для скроллбаров */
+        .scrollable::-webkit-scrollbar { width: 4px; }
+        .scrollable::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+
+        /* Навигация (Пульт) */
+        .selector { cursor: pointer; border: 2px solid transparent; transition: all 0.1s ease-in-out; }
+        .selector.focus { border-color: var(--focus-border); background: var(--surface-hover); transform: scale(1.01); z-index: 10; outline: none; }
+
+        /* Экраны */
+        .screen { display: none; height: 100vh; width: 100vw; }
+        .screen.active { display: flex; flex-direction: column; }
+
+        /* Экран настроек */
+        #screen-settings { padding: 40px; justify-content: center; align-items: center; background: var(--bg); display: none; }
+        #screen-settings.active { display: flex; }
+        .settings-container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 20px; }
+        .settings-container h1 { font-weight: 300; margin-bottom: 10px; }
+        textarea { 
+            width: 100%; height: 200px; background: var(--surface); color: #fff; 
+            border: 1px solid #333; padding: 15px; border-radius: 8px; font-family: monospace; resize: none;
+        }
+        .btn-save { padding: 15px; background: var(--accent); color: #fff; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.2em; }
+
+        /* Основной интерфейс (3 колонки) */
+        .app-header { height: 60px; display: flex; align-items: center; padding: 0 20px; background: #000; justify-content: space-between; flex-shrink: 0; }
+        .groups-bar { display: flex; gap: 10px; overflow-x: auto; flex: 1; margin: 0 20px; }
+        .groups-bar::-webkit-scrollbar { display: none; }
+        .group-item { padding: 6px 15px; background: var(--surface); border-radius: 20px; white-space: nowrap; font-size: 0.9em; }
+        .group-item.active { background: var(--accent); color: #fff; }
+
+        .main-layout { display: flex; flex: 1; overflow: hidden; background: var(--bg); }
+
+        /* Колонка 1: Список каналов (Узкая) */
+        .col-channels { width: 20%; border-right: 1px solid #222; display: flex; flex-direction: column; }
+        .channel-item { display: flex; align-items: center; padding: 12px; gap: 15px; border-bottom: 1px solid #1c1f24; }
+        .ch-logo-container { 
+            width: 50px; height: 50px; position: relative; flex-shrink: 0; 
+            background: #333; border-radius: 6px; overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; color: #fff; font-size: 1.2em;
+        }
+        .ch-logo { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            object-fit: contain; background: #000; transition: opacity 0.3s;
+        }
+        .ch-info { flex: 1; overflow: hidden; }
+        .ch-name { font-weight: bold; font-size: 1.1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 8px; color: #d0d0d0; }
+        .ch-now { font-size: 0.85em; color: #ff9800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
+        .ch-progress-bg { width: 100%; height: 3px; background: rgba(255,255,255,0.1); margin-top: 8px; border-radius: 2px; overflow: hidden; }
+        .ch-progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s ease; }
+        .archive-marker { color: #ff9800; font-size: 0.9em; font-weight: normal; }
+
+        /* Колонка 2: Программа передач + Плеер (Ровно 30% экрана) */
+        .col-schedule { width: 30%; border-right: 1px solid #222; display: flex; flex-direction: column; background: rgba(0,0,0,0.1); }
+        
+        /* Стили контейнера плеера */
+        #player-container { 
+            width: 100%; 
+            background: #000; 
+            display: block; /* Изменили с flex на block для точного позиционирования */
+            line-height: 0; /* Убирает лишние отступы снизу видео */
+            border-bottom: 1px solid #222;
+            flex-shrink: 0;
+        }
+        #main-video { 
+            width: 100%; /* Теперь занимает всю ширину своей 30% колонки */
+            aspect-ratio: 16 / 9; 
+            background: #000;
+            outline: none;
+            display: block;
+        }
+
+        .prog-item { padding: 15px; border-bottom: 1px solid #1c1f24; position: relative; }
+        .prog-item.active-now { background: rgba(79, 172, 254, 0.1); border-left: 4px solid var(--accent); }
+        .day-header { 
+            padding: 10px 15px; 
+            background: rgba(255,255,255,0.03); 
+            color: var(--accent); 
+            font-size: 0.8em; 
+            font-weight: bold; 
+            text-transform: uppercase; 
+            letter-spacing: 1px;
+            border-bottom: 1px solid #222;
+        }
+        .prog-time { font-weight: bold; color: #ff9800; font-size: 0.9em; margin-bottom: 5px; }
+        .prog-title { font-size: 1em; line-height: 1.3; color: #d0d0d0; }
+        .archive-icon { position: absolute; right: 10px; top: 10px; font-size: 0.75em; color: #ff9800; font-weight: bold; border: 1px solid #ff9800; padding: 1px 4px; border-radius: 3px; }
+
+        /* Колонка 3: Описание (Широкая - 50% экрана) */
+        .col-details { width: 50%; display: flex; flex-direction: column; background: var(--bg); }
+        .details-content { padding: 25px; }
+        .fanart { width: 180px; float: left; border-radius: 8px; margin: 0 20px 10px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.5); display: none; }
+        .det-title { font-size: 1.8em; font-weight: bold; margin-bottom: 12px; line-height: 1.2; color: #ff9800; }
+        .det-credits-top { font-size: 0.95em; line-height: 1.5; margin-bottom: 15px; }
+        .det-separator { clear: both; border-top: 1px solid #333; margin: 20px 0; padding-top: 20px; }
+        .det-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; font-size: 0.9em; color: var(--text-muted); font-weight: bold; }
+        .det-meta span { background: rgba(255,255,255,0.05); padding: 3px 8px; border-radius: 4px; }
+        
+        /* Цвета рейтингов */
+        .rating-green { background: #4caf50 !important; color: #000 !important; }
+        .rating-yellow { background: #ffeb3b !important; color: #000 !important; }
+        .rating-orange { background: #ff9800 !important; color: #000 !important; }
+        .rating-red { background: #f44336 !important; color: #fff !important; }
+
+        .det-full-desc { font-size: 1.05em; line-height: 1.6; color: var(--text-muted); margin-bottom: 20px; white-space: pre-wrap; }
+        .credit-label { color: #ff9800; font-weight: normal; }
+        .credit-value { color: #d0d0d0; }
+
+        .scrollable { overflow-y: auto; flex: 1; }
+
+        /* Адаптация для мобильных устройств */
+        @media (max-width: 768px) {
+            .col-channels, .col-schedule, .col-details { 
+                width: 100% !important; 
+                display: none !important; 
+                border-right: none;
+            }
+            
+            /* Классы для управления видимостью колонок на мобильных */
+            .main-layout.view-channels .col-channels { display: flex !important; }
+            .main-layout.view-schedule .col-schedule { display: flex !important; }
+            .main-layout.view-details .col-details { display: flex !important; }
+            
+            #mobile-back { display: block !important; }
+            
+            .groups-bar { margin: 0 10px; }
+            .det-title { font-size: 1.5em; }
+            .fanart { width: 120px; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <!-- ЭКРАН НАСТРОЕК -->
+    <div id="screen-settings" class="screen">
+        <div class="settings-container">
+            <h1>Настройки источников</h1>
+            <textarea id="input-m3u" placeholder="Вставьте текст M3U плейлиста сюда..."></textarea>
+            <textarea id="input-epg" placeholder="Вставьте текст XMLTV (EPG) сюда..."></textarea>
+            <div style="display: flex; align-items: center; gap: 15px; background: var(--surface); padding: 15px; border-radius: 8px;">
+                <label style="flex: 1;">Смещение времени (EPG), в часах:</label>
+                <input type="number" id="input-tz" value="0" style="width: 80px; padding: 10px; background: #000; border: 1px solid #333; color: #fff; border-radius: 4px;">
+            </div>
+            <div class="btn-save selector" id="btn-save">Загрузить данные</div>
+        </div>
+    </div>
+
+    <!-- ОСНОВНОЙ ЭКРАН -->
+    <div id="screen-main" class="screen">
+        <header class="app-header">
+            <div id="mobile-back" class="selector" style="display: none; padding: 5px 12px; background: var(--surface); border-radius: 6px; margin-right: 10px;">⬅</div>
+            <div style="font-weight: 900; font-size: 1.4em; color: var(--accent); flex-shrink: 0;">EPG GUIDE</div>
+            <div class="groups-bar" id="groups-bar"></div>
+            <div class="selector" id="btn-to-settings" style="padding: 5px 15px; background: var(--surface); border-radius: 6px;">⚙ Настройки</div>
+        </header>
+
+        <div class="main-layout">
+            <!-- Колонки -->
+            <div class="col-channels">
+                <div class="scrollable" id="list-channels"></div>
+            </div>
+            
+            <div class="col-schedule">
+                <div id="player-container">
+                    <video id="main-video" controls autoplay class="selector"></video>
+                </div>
+                <div class="scrollable" id="list-schedule"></div>
+            </div>
+
+            <div class="col-details">
+                <div class="scrollable" id="details-view">
+                    <div class="details-content" id="details-container">
+                        <div style="text-align: center; opacity: 0.3; margin-top: 50px;">Выберите передачу для просмотра описания</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+/**
+ * IPTV EPG GUIDE ENGINE
+ */
+const App = {
+    channels: [],
+    epg: {},
+    groups: [],
+    currentGroup: 'Все',
+    selectedChannel: null,
+
+    async init() {
+        Nav.init();
+
+        // Регистрация Service Worker для обхода Referer/User-Agent
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(() => console.log('Service Worker: Активен'))
+                .catch(err => console.error('Service Worker: Ошибка', err));
+        }
+        
+        const m3u = localStorage.getItem('guide_m3u') || '';
+        const epgText = localStorage.getItem('guide_epg') || '';
+        const tz = localStorage.getItem('guide_tz') || '0';
+        document.getElementById('input-m3u').value = m3u;
+        document.getElementById('input-epg').value = epgText;
+        document.getElementById('input-tz').value = tz;
+
+        document.getElementById('btn-save').onclick = () => this.loadData();
+        document.getElementById('btn-to-settings').onclick = () => this.showScreen('settings');
+        document.getElementById('mobile-back').onclick = () => this.goBack();
+
+        if (m3u) {
+            // Пытаемся быстро загрузить EPG из кэша IndexedDB
+            const cachedEpg = await DB.load();
+            if (cachedEpg) {
+                this.epg = cachedEpg;
+                this.channels = Parser.m3u(m3u);
+                const gSet = new Set(['Все']);
+                this.channels.forEach(c => { if(c.group) gSet.add(c.group); });
+                this.groups = Array.from(gSet);
+                this.renderGroups();
+                this.renderChannels();
+                this.showScreen('main');
+            } else {
+                // Если в базе пусто, но текст есть — парсим
+                this.loadData();
+            }
+        } else {
+            this.showScreen('settings');
+        }
+    },
+
+    showScreen(id) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(`screen-${id}`).classList.add('active');
+        if (id === 'main') this.setMobileView('channels');
+        Nav.resetFocus();
+    },
+
+    setMobileView(view) {
+        const layout = document.querySelector('.main-layout');
+        layout.classList.remove('view-channels', 'view-schedule', 'view-details');
+        layout.classList.add('view-' + view);
+        this.currentView = view;
+        
+        // Скрываем кнопку Назад на главном списке каналов
+        document.getElementById('mobile-back').style.visibility = (view === 'channels') ? 'hidden' : 'visible';
+    },
+
+    goBack() {
+        if (this.currentView === 'details') this.setMobileView('schedule');
+        else if (this.currentView === 'schedule') this.setMobileView('channels');
+    },
+
+    async loadData() {
+        const m3uText = document.getElementById('input-m3u').value;
+        const epgText = document.getElementById('input-epg').value;
+        const tzValue = document.getElementById('input-tz').value;
+
+        localStorage.setItem('guide_m3u', m3uText);
+        localStorage.setItem('guide_epg', epgText);
+        localStorage.setItem('guide_tz', tzValue);
+
+        this.channels = Parser.m3u(m3uText);
+        this.epg = Parser.xmltv(epgText);
+
+        // Сохраняем распарсенную программу в быструю базу данных
+        if (Object.keys(this.epg).length > 0) {
+            await DB.save(this.epg);
+        }
+
+        const gSet = new Set(['Все']);
+        this.channels.forEach(c => { if(c.group) gSet.add(c.group); });
+        this.groups = Array.from(gSet);
+
+        this.renderGroups();
+        this.renderChannels();
+        this.showScreen('main');
+    },
+
+    renderGroups() {
+        const bar = document.getElementById('groups-bar');
+        bar.innerHTML = this.groups.map(g => 
+            `<div class="group-item selector ${g === this.currentGroup ? 'active' : ''}" data-group="${g}">${g}</div>`
+        ).join('');
+
+        bar.querySelectorAll('.group-item').forEach(el => {
+            el.onclick = () => {
+                this.currentGroup = el.dataset.group;
+                this.renderGroups();
+                this.renderChannels();
+            };
+        });
+    },
+
+    renderChannels() {
+        const list = document.getElementById('list-channels');
+        list.innerHTML = '';
+        const now = Date.now();
+
+        const filtered = this.channels.filter(c => this.currentGroup === 'Все' || c.group === this.currentGroup);
+
+        filtered.forEach(ch => {
+            const el = document.createElement('div');
+            el.className = 'channel-item selector';
+            
+            let nowTitle = 'Нет данных';
+            let progressWidth = 0;
+            
+            if (this.epg[ch.id]) {
+                const prog = this.epg[ch.id].find(p => now >= p.start && now <= p.stop);
+                if (prog) {
+                    nowTitle = prog.title;
+                    const total = prog.stop - prog.start;
+                    const elapsed = now - prog.start;
+                    progressWidth = Math.max(0, Math.min(100, (elapsed / total) * 100));
+                }
+            }
+
+            // Безопасная структура логотипа (использует стили из Патча 10)
+            const firstLetter = ch.name ? ch.name[0].toUpperCase() : '?';
+            const logoHtml = `
+                <div class="ch-logo-container">
+                    ${firstLetter}
+                    ${ch.logo ? `<img class="ch-logo" src="${ch.logo}" onerror="this.style.opacity=0">` : ''}
+                </div>
+            `;
+
+            el.innerHTML = `
+                ${logoHtml}
+                <div class="ch-info">
+                    <div class="ch-name">${ch.name} ${ch.archive ? '<span class="archive-marker" title="Есть архив">↺</span>' : ''}</div>
+                    <div class="ch-now">${nowTitle}</div>
+                    <div class="ch-progress-bg">
+                        <div class="ch-progress-fill" style="width: ${progressWidth}%"></div>
+                    </div>
+                </div>
+            `;
+
+            el.onclick = () => this.selectChannel(ch, el);
+            list.appendChild(el);
+        });
+        Nav.resetFocus();
+    },
+
+    selectChannel(ch, element) {
+        this.selectedChannel = ch;
+        Player.play(ch.url);
+        this.renderSchedule(ch.id);
+        if (window.innerWidth <= 768) this.setMobileView('schedule');
+    },
+
+    renderSchedule(channelId) {
+        const list = document.getElementById('list-schedule');
+        list.innerHTML = '';
+        const programs = this.epg[channelId] || [];
+        const now = Date.now();
+
+        if (programs.length === 0) {
+            list.innerHTML = '<div style="padding:20px; opacity:0.3;">Программа передач отсутствует</div>';
+            return;
+        }
+
+        let lastDateStr = '';
+
+        programs.forEach(p => {
+            const pDate = new Date(p.start);
+            const pDateStr = pDate.toDateString();
+            if (pDateStr !== lastDateStr) {
+                const header = document.createElement('div');
+                header.className = 'day-header';
+                header.innerText = this.formatDate(p.start);
+                list.appendChild(header);
+                lastDateStr = pDateStr;
+            }
+
+            const isNow = now >= p.start && now <= p.stop;
+            const isPast = now > p.stop;
+            const hasArchive = isPast && this.selectedChannel?.archive;
+
+            const el = document.createElement('div');
+            el.className = `prog-item selector ${isNow ? 'active-now' : ''}`;
+            
+            const time = `${p.timeStart} - ${p.timeStop}`;
+            el.innerHTML = `
+                ${hasArchive ? '<span class="archive-icon">АРХИВ</span>' : ''}
+                <div class="prog-time">${time}</div>
+                <div class="prog-title">${p.title}</div>
+            `;
+
+            el.onclick = () => {
+                this.renderDetails(p);
+                if (isNow) Player.play(this.selectedChannel.url);
+                else if (hasArchive) Player.play(Catchup.buildUrl(this.selectedChannel, p));
+            };
+            list.appendChild(el);
+
+            if (isNow) {
+                setTimeout(() => el.scrollIntoView({behavior: 'smooth', block: 'center'}), 100);
+                this.renderDetails(p); 
+            }
+        });
+    },
+
+    renderDetails(p) {
+        const container = document.getElementById('details-container');
+        
+        // Обработка рейтинга
+        const rating = this.getRatingInfo(p.rating);
+        const ratingHtml = rating ? `<span class="${rating.class}">${rating.label}</span>` : '';
+
+        // Собираем мета-информацию (Тех. инфо)
+        const duration = this.formatDuration(p.durationMs);
+        const metaHtml = `
+            <div class="det-meta">
+                ${ratingHtml}
+                ${duration ? `<span>${duration}</span>` : ''}
+                ${p.date ? `<span>${p.date}</span>` : ''}
+                ${p.countries.map(c => `<span>${c}</span>`).join('')}
+                ${p.categories.map(c => `<span>${c}</span>`).join('')}
+            </div>
+        `;
+
+        const directors = p.directors.length ? `<div class="det-credits-top"><span class="credit-label">Режиссер:</span> <span class="credit-value">${p.directors.join(', ')}</span></div>` : '';
+        const actors = p.actors.length ? `<div class="det-credits-top"><span class="credit-label">В ролях:</span> <span class="credit-value">${p.actors.join(', ')}</span></div>` : '';
+
+        container.innerHTML = `
+            <img class="fanart" id="det-img" src="${p.icon}" onload="this.style.display='block'">
+            <div class="det-title">${p.title}</div>
+            ${metaHtml}
+            ${directors}
+            ${actors}
+            <div class="det-separator"></div>
+            <div class="det-full-desc">${p.desc}</div>
+        `;
+        document.getElementById('details-view').scrollTop = 0;
+        if (window.innerWidth <= 768) this.setMobileView('details');
+    },
+
+    formatDate(timestamp) {
+        const d = new Date(timestamp);
+        const days = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
+        const months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+        const dayName = days[d.getDay()];
+        const monthName = months[d.getMonth()];
+        const year = d.getFullYear();
+        const currentYear = new Date().getFullYear();
+        const yearStr = year !== currentYear ? ` ${year}` : '';
+        return `${dayName}, ${d.getDate()} ${monthName}${yearStr}`;
+    },
+
+    getRatingInfo(val) {
+        if (!val) return null;
+        const s = val.toString().toLowerCase().trim().replace('+', '');
+        
+        const green = ['0', 'g', 'al', 'all', 'general'];
+        const yellow = ['6', '12', 'pg', 'pg-12', '6-12'];
+        const orange = ['16', 'pg-13', '16-18'];
+        const red = ['18', 'r', 'nc-17', 'x', 'adult', '18-only'];
+
+        if (green.includes(s)) return { class: 'rating-green', label: val };
+        if (yellow.includes(s)) return { class: 'rating-yellow', label: val };
+        if (orange.includes(s)) return { class: 'rating-orange', label: val };
+        if (red.includes(s)) return { class: 'rating-red', label: val };
+        
+        return { class: '', label: val };
+    },
+
+    formatDuration(ms) {
+        if (!ms) return '';
+        const totalMinutes = Math.round(ms / 60000);
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        
+        let res = '';
+        if (hours > 0) res += hours + ' ч. ';
+        if (minutes > 0 || hours === 0) res += minutes + ' мин.';
+        return res.trim();
+    }
+};
+
+/**
+ * PARSERS
+ */
+const Parser = {
+    m3u(text) {
+        const lines = text.split('\n');
+        const channels = [];
+        let current = null;
+
+        lines.forEach(line => {
+            line = line.trim();
+            if (line.startsWith('#EXTINF:')) {
+                current = {
+                    id: this.attr(line, 'tvg-id') || this.attr(line, 'tvg-name'),
+                    name: line.split(',').pop().trim(),
+                    logo: this.attr(line, 'tvg-logo'),
+                    group: this.attr(line, 'group-title'),
+                    archive: line.includes('catchup="') || line.includes('catchup-days="'),
+                    catchupType: this.attr(line, 'catchup'),
+                    catchupSource: this.attr(line, 'catchup-source')
+                };
+            } else if (line && !line.startsWith('#')) {
+                if (current) {
+                    current.url = line;
+                    channels.push(current);
+                    current = null;
+                }
+            }
+        });
+        return channels;
+    },
+
+    attr(line, name) {
+        const match = line.match(new RegExp(`${name}="([^"]*)"`, 'i'));
+        return match ? match[1] : '';
+    },
+
+    xmltv(xmlString) {
+        if (!xmlString) return {};
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlString, 'text/xml');
+        const result = {};
+
+        const progs = doc.getElementsByTagName('programme');
+        for (let p of progs) {
+            const chId = p.getAttribute('channel');
+            const start = this.parseDate(p.getAttribute('start'));
+            const stop = this.parseDate(p.getAttribute('stop'));
+
+            if (!result[chId]) result[chId] = [];
+
+            const getTag = (name) => p.getElementsByTagName(name)[0]?.textContent || '';
+            const getTags = (name) => Array.from(p.getElementsByTagName(name)).map(el => el.textContent);
+
+            result[chId].push({
+                start: start.getTime(),
+                stop: stop.getTime(),
+                durationMs: stop.getTime() - start.getTime(),
+                timeStart: this.formatTime(start),
+                timeStop: this.formatTime(stop),
+                title: getTag('title'),
+                desc: getTag('desc'),
+                icon: p.getElementsByTagName('icon')[0]?.getAttribute('src') || '',
+                categories: getTags('category'),
+                date: getTag('date'),
+                countries: getTags('country'),
+                rating: p.getElementsByTagName('rating')[0]?.getElementsByTagName('value')[0]?.textContent || '',
+                directors: Array.from(p.getElementsByTagName('director')).map(el => el.textContent),
+                actors: Array.from(p.getElementsByTagName('actor')).map(el => el.textContent),
+                hasArchive: false // Будет сверяться с каналом
+            });
+        }
+        return result;
+    },
+
+    parseDate(str) {
+        // Формат: 20260315120000 +0300
+        const m = str.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})/);
+        let date = new Date();
+        if (m) {
+            const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7].slice(0,3)}:${m[7].slice(3)}`;
+            date = new Date(iso);
+        }
+        
+        // Применяем пользовательский сдвиг (Timezone Offset)
+        const offsetHours = parseInt(localStorage.getItem('guide_tz') || '0');
+        if (offsetHours !== 0) {
+            date.setHours(date.getHours() + offsetHours);
+        }
+        return date;
+    },
+
+    formatTime(d) {
+        return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+    }
+};
+
+/**
+ * SPATIAL NAVIGATION (REMOTE CONTROL)
+ */
+const Nav = {
+    current: null,
+    init() {
+        window.addEventListener('keydown', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key)) {
+                if (document.activeElement.tagName === 'TEXTAREA') {
+                    if (e.key === 'Escape') document.activeElement.blur();
+                    return;
+                }
+                e.preventDefault();
+                this.move(e.key);
+            }
+        });
+        
+        // Мышь
+        document.addEventListener('mouseover', (e) => {
+            const s = e.target.closest('.selector');
+            if (s) this.setFocus(s);
+        });
+    },
+
+    setFocus(el) {
+        if (this.current) this.current.classList.remove('focus');
+        this.current = el;
+        el.classList.add('focus');
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    },
+
+    resetFocus() {
+        const first = document.querySelector('.screen.active .selector');
+        if (first) this.setFocus(first);
+    },
+
+    move(key) {
+        if (key === 'Enter') {
+            this.current?.click();
+            return;
+        }
+
+        const rect = this.current.getBoundingClientRect();
+        const curX = rect.left + rect.width / 2;
+        const curY = rect.top + rect.height / 2;
+
+        const all = Array.from(document.querySelectorAll('.screen.active .selector'));
+        let best = null;
+        let minDiff = Infinity;
+
+        all.forEach(el => {
+            if (el === this.current) return;
+            const r = el.getBoundingClientRect();
+            const x = r.left + r.width / 2;
+            const y = r.top + r.height / 2;
+
+            const dx = x - curX;
+            const dy = y - curY;
+
+            let valid = false;
+            if (key === 'ArrowUp' && dy < 0 && Math.abs(dx) < Math.abs(dy)) valid = true;
+            if (key === 'ArrowDown' && dy > 0 && Math.abs(dx) < Math.abs(dy)) valid = true;
+            if (key === 'ArrowLeft' && dx < 0 && Math.abs(dy) < Math.abs(dx)) valid = true;
+            if (key === 'ArrowRight' && dx > 0 && Math.abs(dy) < Math.abs(dx)) valid = true;
+
+            if (valid) {
+                const diff = Math.sqrt(dx*dx + dy*dy);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    best = el;
+                }
+            }
+        });
+
+        if (best) this.setFocus(best);
+    }
+};
+
+/**
+ * DATABASE MANAGER (IndexedDB)
+ */
+const DB = {
+    dbName: 'IPTV_EPG_CACHE',
+    storeName: 'epg_data',
+
+    open() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, 1);
+            request.onupgradeneeded = (e) => {
+                e.target.result.createObjectStore(this.storeName);
+            };
+            request.onsuccess = (e) => resolve(e.target.result);
+            request.onerror = (e) => reject(e.target.error);
+        });
+    },
+
+    async save(epgObject) {
+        const db = await this.open();
+        const tx = db.transaction(this.storeName, 'readwrite');
+        tx.objectStore(this.storeName).put(epgObject, 'current_epg');
+        return new Promise((resolve) => tx.oncomplete = () => resolve());
+    },
+
+    async load() {
+        const db = await this.open();
+        return new Promise((resolve) => {
+            const request = db.transaction(this.storeName).objectStore(this.storeName).get('current_epg');
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => resolve(null);
+        });
+    }
+};
+
+/**
+ * LOGIC FOR CATCHUP (ARCHIVE)
+ */
+const Catchup = {
+    buildUrl(channel, p) {
+        let source = channel.catchupSource;
+        if (!source) return channel.url;
+        
+        const startTS = Math.floor(p.start / 1000);
+        const endTS = Math.floor(p.stop / 1000);
+        const dur = Math.round((p.stop - p.start) / 1000);
+
+        // Замена плейсхолдеров
+        let res = source
+            .replace('${start}', startTS).replace('{utc}', startTS)
+            .replace('${end}', endTS).replace('{lutc}', endTS)
+            .replace('${duration}', dur).replace('{offset}', '0');
+
+        if (res.startsWith('?') || res.startsWith('&')) {
+            const sep = channel.url.includes('?') ? '&' : '?';
+            return channel.url + sep + res.replace(/^[?&]/, '');
+        } else if (res.includes('://')) {
+            return res;
+        } else {
+            const sep = channel.url.endsWith('/') ? '' : '/';
+            return channel.url + (channel.catchupType === 'append' ? res : sep + res);
+        }
+    }
+};
+
+/**
+ * VIDEO PLAYER ENGINE
+ */
+const Player = {
+    hls: null,
+    dash: null,
+    ts: null,
+
+    play(url) {
+        this.stop();
+        const video = document.getElementById('main-video');
+        if (!video) return;
+
+        const lowUrl = url.toLowerCase();
+        // Определяем тип потока по части ссылки до знака трубы "|"
+        const streamTypeUrl = lowUrl.split('|')[0];
+
+        if (streamTypeUrl.includes('.mpd')) {
+            // Воспроизведение DASH
+            this.dash = dashjs.MediaPlayer().create();
+            this.dash.initialize(video, url, true);
+        } else if (streamTypeUrl.includes('.m3u8')) {
+            // Воспроизведение HLS
+            if (Hls.isSupported()) {
+                this.hls = new Hls();
+                this.hls.loadSource(url);
+                this.hls.attachMedia(video);
+                this.hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Для Safari
+                video.src = url;
+                video.play();
+            }
+        } else if (streamTypeUrl.includes('.ts') || streamTypeUrl.includes('.flv')) {
+            // Воспроизведение MPEG-TS или FLV
+            if (mpegts.getFeatureList().mse) {
+                this.ts = mpegts.createPlayer({
+                    type: streamTypeUrl.includes('.ts') ? 'mse' : 'flv',
+                    url: url
+                });
+                this.ts.attachMediaElement(video);
+                this.ts.load();
+                this.ts.play();
+            }
+        } else {
+            // Обычные форматы (MP4, WebM, MP3, FLAC)
+            video.src = url;
+            video.play().catch(e => console.warn("Playback error:", e));
+        }
+    },
+
+    stop() {
+        const video = document.getElementById('main-video');
+        if (!video) return;
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        if (this.hls) { this.hls.destroy(); this.hls = null; }
+        if (this.dash) { this.dash.reset(); this.dash = null; }
+        if (this.ts) { this.ts.destroy(); this.ts = null; }
+    }
+};
+
+document.addEventListener('DOMContentLoaded', () => App.init());
+</script>
+</body>
+</html>
