@@ -123,6 +123,26 @@
         #player-container:hover #btn-stop-player, 
         #btn-stop-player.focus { display: block; }
 
+        /* HUD Громкости */
+        #volume-hud {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            color: #fff;
+            padding: 20px 30px;
+            border-radius: 15px;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            z-index: 1000;
+            pointer-events: none;
+            border: 1px solid var(--accent);
+        }
+        .vol-bar-bg { width: 150px; height: 6px; background: rgba(255,255,255,0.2); margin-top: 10px; border-radius: 3px; }
+        .vol-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.1s; }
+
         /* Состояния элементов списка */
         .channel-item.is-selected, .prog-item.is-selected { 
             border: 2px solid #fff !important; 
@@ -231,7 +251,13 @@
     <div id="screen-main" class="screen">
         <header class="app-header">
             <div id="mobile-back" class="selector" style="display: none; padding: 5px 12px; background: var(--surface); border-radius: 6px; margin-right: 10px;">⬅</div>
-            <div style="font-weight: 900; font-size: 1.4em; color: var(--accent); flex-shrink: 0;">EPG GUIDE</div>
+            <div style="font-weight: 900; font-size: 1.4em; color: var(--accent); flex-shrink: 0; margin-right: 20px;">EPG GUIDE</div>
+            
+            <div id="search-wrapper" class="selector" style="display: flex; align-items: center; background: var(--surface); padding: 0 10px; border-radius: 6px; flex: 1; max-width: 300px;">
+                <span style="opacity: 0.5; margin-right: 8px;">🔍</span>
+                <input type="text" id="input-search" placeholder="Поиск каналов и передач..." style="background: transparent; border: none; color: #fff; padding: 8px 0; outline: none; width: 100%; font-size: 0.9em;">
+            </div>
+
             <div class="groups-bar" id="groups-bar"></div>
             <div class="selector" id="btn-to-settings" style="padding: 5px 15px; background: var(--surface); border-radius: 6px;">⚙ Настройки</div>
         </header>
@@ -239,6 +265,11 @@
         <div class="main-layout">
             <div id="player-container">
                 <div id="btn-stop-player" class="selector">✖ ОСТАНОВИТЬ</div>
+                <div id="volume-hud">
+                    <div style="font-size: 2em;" id="vol-icon">🔊</div>
+                    <div id="vol-value" style="font-weight: bold; margin-top: 5px;">100%</div>
+                    <div class="vol-bar-bg"><div class="vol-bar-fill" id="vol-fill" style="width: 100%;"></div></div>
+                </div>
                 <video id="main-video" controls autoplay class="selector"></video>
             </div>
 
@@ -271,12 +302,40 @@ const App = {
     epg: {},
     groups: [],
     currentGroup: 'Все',
+    searchQuery: '',
     selectedChannel: null,
     playingChannelId: null,
     selectedProgram: null,
     playingProgramId: null,
 
     async init() {
+        // Логика поиска
+        const searchInput = document.getElementById('input-search');
+        const searchWrapper = document.getElementById('search-wrapper');
+
+        searchWrapper.onclick = () => {
+            searchInput.focus();
+        };
+
+        searchInput.oninput = (e) => {
+            this.searchQuery = e.target.value;
+            this.renderChannels();
+            // Если мы в поиске, обновляем и правую колонку тоже
+            if (this.searchQuery) {
+                this.renderSchedule();
+            } else if (this.selectedChannel) {
+                this.renderSchedule(this.selectedChannel.id);
+            }
+        };
+
+        searchInput.onkeydown = (e) => {
+            if (e.key === 'Enter') searchInput.blur();
+            if (e.key === 'ArrowDown') {
+                searchInput.blur();
+                const firstChannel = document.querySelector('#list-channels .selector');
+                if (firstChannel) Nav.setFocus(firstChannel);
+            }
+        };
         Nav.init();
 
         // Инициализация жестов (Swipe)
@@ -452,51 +511,53 @@ const App = {
         list.innerHTML = '';
         const now = Date.now();
 
-        const filtered = this.channels.filter(c => this.currentGroup === 'Все' || c.group === this.currentGroup);
+        const filtered = this.channels.filter(c => {
+            const matchesGroup = this.currentGroup === 'Все' || c.group === this.currentGroup;
+            if (!this.searchQuery) return matchesGroup;
+
+            const q = this.searchQuery.toLowerCase();
+            const matchesName = c.name.toLowerCase().includes(q);
+            const matchesEpg = (this.epg[c.id] || []).some(p => 
+                p.title.toLowerCase().includes(q) || (p.subTitle && p.subTitle.toLowerCase().includes(q))
+            );
+            return matchesGroup && (matchesName || matchesEpg);
+        });
+
+        if (filtered.length === 0 && this.searchQuery) {
+            list.innerHTML = '<div style="padding:20px; opacity:0.3; text-align:center;">Каналы не найдены</div>';
+        }
 
         filtered.forEach(ch => {
             const el = document.createElement('div');
-            
-            let classes = ['channel-item', 'selector'];
-            if (this.selectedChannel && this.selectedChannel.id === ch.id) classes.push('is-selected');
-            if (this.playingChannelId === ch.id) classes.push('is-playing');
-            el.className = classes.join(' ');
+            el.className = `channel-item selector ${this.selectedChannel?.id === ch.id ? 'is-selected' : ''} ${this.playingChannelId === ch.id ? 'is-playing' : ''}`;
             el.dataset.id = ch.id;
             
             let nowTitle = 'Нет данных';
             let progressWidth = 0;
-            
             if (this.epg[ch.id]) {
                 const prog = this.epg[ch.id].find(p => now >= p.start && now <= p.stop);
                 if (prog) {
                     nowTitle = prog.title;
-                    const total = prog.stop - prog.start;
-                    const elapsed = now - prog.start;
+                    const total = prog.stop - prog.start, elapsed = now - prog.start;
                     progressWidth = Math.max(0, Math.min(100, (elapsed / total) * 100));
                 }
             }
 
-            // Безопасная структура логотипа (использует стили из Патча 10)
-            const firstLetter = ch.name ? ch.name[0].toUpperCase() : '?';
-            const logoHtml = `
-                <div class="ch-logo-container">
-                    ${firstLetter}
-                    ${ch.logo ? `<img class="ch-logo" src="${ch.logo}" onerror="this.style.opacity=0">` : ''}
-                </div>
-            `;
-
             el.innerHTML = `
-                ${logoHtml}
+                <div class="ch-logo-container">
+                    ${ch.name[0].toUpperCase()}${ch.logo ? `<img class="ch-logo" src="${ch.logo}" onerror="this.style.opacity=0">` : ''}
+                </div>
                 <div class="ch-info">
-                    <div class="ch-name">${ch.name} ${ch.archive ? '<span class="archive-marker" title="Есть архив">↺</span>' : ''}</div>
+                    <div class="ch-name">${ch.name} ${ch.archive ? '<span class="archive-marker">↺</span>' : ''}</div>
                     <div class="ch-now">${nowTitle}</div>
-                    <div class="ch-progress-bg">
-                        <div class="ch-progress-fill" style="width: ${progressWidth}%"></div>
-                    </div>
+                    <div class="ch-progress-bg"><div class="ch-progress-fill" style="width: ${progressWidth}%"></div></div>
                 </div>
             `;
-
-            el.onclick = () => this.selectChannel(ch, el);
+            el.onclick = () => {
+                this.searchQuery = ''; 
+                document.getElementById('input-search').value = '';
+                this.selectChannel(ch, el);
+            };
             list.appendChild(el);
         });
         Nav.resetFocus();
@@ -521,11 +582,28 @@ const App = {
     renderSchedule(channelId) {
         const list = document.getElementById('list-schedule');
         list.innerHTML = '';
-        const programs = this.epg[channelId] || [];
         const now = Date.now();
+        let programs = [];
+
+        // Если есть поисковый запрос - собираем данные со всех каналов
+        if (this.searchQuery) {
+            const q = this.searchQuery.toLowerCase();
+            Object.keys(this.epg).forEach(chId => {
+                const ch = this.channels.find(c => c.id === chId);
+                this.epg[chId].forEach(p => {
+                    if (p.title.toLowerCase().includes(q) || (p.subTitle && p.subTitle.toLowerCase().includes(q))) {
+                        programs.push({...p, channelName: ch ? ch.name : chId, channelObj: ch});
+                    }
+                });
+            });
+            // Сортировка: Хронологическая (Архив -> Сейчас -> Будущее)
+            programs.sort((a, b) => a.start - b.start);
+        } else {
+            programs = (this.epg[channelId] || []).map(p => ({...p, channelObj: this.selectedChannel}));
+        }
 
         if (programs.length === 0) {
-            list.innerHTML = '<div style="padding:20px; opacity:0.3;">Программа передач отсутствует</div>';
+            list.innerHTML = `<div style="padding:20px; opacity:0.3;">${this.searchQuery ? 'Ничего не найдено' : 'Программа отсутствует'}</div>`;
             return;
         }
 
@@ -543,51 +621,40 @@ const App = {
 
             const isNow = now >= p.start && now <= p.stop;
             const isPast = now > p.stop;
-            const hasArchive = isPast && this.selectedChannel?.archive;
-            const progId = p.start + p.title; // Уникальный ID для передачи
+            const hasArchive = isPast && p.channelObj?.archive;
+            const progId = p.start + p.title + (p.channelName || '');
 
             const el = document.createElement('div');
-            // Добавляем классы состояний
-            let classes = ['prog-item', 'selector'];
-            if (isNow) classes.push('active-now');
-            if (this.selectedProgram === progId) classes.push('is-selected');
-            if (this.playingProgramId === progId) classes.push('is-playing');
+            el.className = `prog-item selector ${isNow ? 'active-now' : ''} ${this.selectedProgram === progId ? 'is-selected' : ''} ${this.playingProgramId === progId ? 'is-playing' : ''}`;
             
-            el.className = classes.join(' ');
-            
-            const time = `${p.timeStart} - ${p.timeStop}`;
             el.innerHTML = `
                 ${hasArchive ? '<span class="archive-icon">АРХИВ</span>' : ''}
-                <div class="prog-time">${time}</div>
+                <div class="prog-time">${p.timeStart} - ${p.timeStop} ${p.channelName ? `<span style="color:var(--accent); margin-left:10px;">[${p.channelName}]</span>` : ''}</div>
                 <div class="prog-title">${p.title}</div>
             `;
 
             el.onclick = () => {
-                // Если передача уже выбрана - 2-й клик запускает видео
                 if (this.selectedProgram === progId) {
-                    if (isNow) {
-                        this.playingChannelId = this.selectedChannel.id;
+                    if (isNow && p.channelObj) {
+                        this.playingChannelId = p.channelObj.id;
                         this.playingProgramId = null;
-                        Player.play(this.selectedChannel.url);
-                    } else if (hasArchive) {
-                        this.playingChannelId = this.selectedChannel.id;
+                        Player.play(p.channelObj.url);
+                    } else if (hasArchive && p.channelObj) {
+                        this.playingChannelId = p.channelObj.id;
                         this.playingProgramId = progId;
-                        Player.play(Catchup.buildUrl(this.selectedChannel, p));
+                        Player.play(Catchup.buildUrl(p.channelObj, p));
                     }
-                    this.renderSchedule(channelId); // Обновить метку "играет"
-                    this.renderChannels(); // Чтобы снять/поставить метку с канала
+                    this.renderSchedule(channelId);
+                    this.renderChannels();
                 } else {
-                    // 1-й клик - выбор и детали
                     this.selectedProgram = progId;
                     this.renderDetails(p);
-                    this.renderSchedule(channelId); // Обновить белую рамку
+                    this.renderSchedule(channelId);
                 }
             };
             list.appendChild(el);
-
-            if (isNow && !this.selectedProgram) {
+            if (isNow && !this.selectedProgram && !this.searchQuery) {
                 setTimeout(() => el.scrollIntoView({behavior: 'smooth', block: 'center'}), 100);
-                this.renderDetails(p); 
             }
         });
     },
@@ -685,6 +752,33 @@ const App = {
         if (hours > 0) res += hours + ' ч. ';
         if (minutes > 0 || hours === 0) res += minutes + ' мин.';
         return res.trim();
+    },
+
+    adjustVolume(delta) {
+        const video = document.getElementById('main-video');
+        if (!video) return;
+
+        let vol = video.volume + delta;
+        if (vol > 1) vol = 1;
+        if (vol < 0) vol = 0;
+        video.volume = vol;
+
+        // Показ HUD
+        const hud = document.getElementById('volume-hud');
+        const val = document.getElementById('vol-value');
+        const fill = document.getElementById('vol-fill');
+        const icon = document.getElementById('vol-icon');
+
+        if (hud) {
+            hud.style.display = 'flex';
+            const percent = Math.round(vol * 100);
+            val.innerText = percent + '%';
+            fill.style.width = percent + '%';
+            icon.innerText = video.muted || vol === 0 ? '🔇' : (vol < 0.5 ? '🔉' : '🔊');
+
+            clearTimeout(this.volTimer);
+            this.volTimer = setTimeout(() => hud.style.display = 'none', 2000);
+        }
     }
 };
 
@@ -813,17 +907,37 @@ const Nav = {
     current: null,
     init() {
         window.addEventListener('keydown', (e) => {
+            const video = document.getElementById('main-video');
+            const isVideoFocused = this.current && this.current.id === 'main-video';
+
+            // Глобальные клавиши громкости (+, -, M)
+            if (e.key === '+' || e.key === '=') { App.adjustVolume(0.05); return; }
+            if (e.key === '-' || e.key === '_') { App.adjustVolume(-0.05); return; }
+            if (e.key.toLowerCase() === 'm') { 
+                if (video) video.muted = !video.muted; 
+                App.adjustVolume(0); 
+                return; 
+            }
+
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key)) {
-                if (document.activeElement.tagName === 'TEXTAREA') {
+                // Если мы в поле ввода - не перехватываем стрелки (кроме Escape)
+                if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') {
                     if (e.key === 'Escape') document.activeElement.blur();
                     return;
                 }
+
+                // Управление громкостью стрелками Вверх/Вниз, если смотрим видео
+                if (isVideoFocused && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                    e.preventDefault();
+                    App.adjustVolume(e.key === 'ArrowUp' ? 0.05 : -0.05);
+                    return;
+                }
+
                 e.preventDefault();
                 this.move(e.key);
             }
         });
         
-        // Мышь
         document.addEventListener('mouseover', (e) => {
             const s = e.target.closest('.selector');
             if (s) this.setFocus(s);
