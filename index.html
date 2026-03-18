@@ -762,34 +762,45 @@ const Player = {
     hls: null,
     dash: null,
     ts: null,
+    lastUrl: '',
+    isRetrying: false,
 
     play(url) {
         this.stop();
         const video = document.getElementById('main-video');
         if (!video) return;
 
+        this.lastUrl = url;
+        
+        // Слушаем ошибки для автоматического "отката" (Fallback)
+        video.onerror = () => this.handleError();
+
         const lowUrl = url.toLowerCase();
-        // Определяем тип потока по части ссылки до знака трубы "|"
-        const streamTypeUrl = lowUrl.split('|')[0];
+        // Часть ссылки до знака трубы
+        const streamTypeUrl = lowUrl.split('|')[0] || lowUrl.split('%7c')[0];
 
         if (streamTypeUrl.includes('.mpd')) {
-            // Воспроизведение DASH
             this.dash = dashjs.MediaPlayer().create();
             this.dash.initialize(video, url, true);
         } else if (streamTypeUrl.includes('.m3u8')) {
-            // Воспроизведение HLS
             if (Hls.isSupported()) {
-                this.hls = new Hls();
+                // Если есть Tampermonkey, помогаем библиотеке hls.js (через xhrSetup)
+                this.hls = new Hls({
+                    xhrSetup: (xhr, xhrUrl) => {
+                        xhr.withCredentials = false;
+                    }
+                });
                 this.hls.loadSource(url);
                 this.hls.attachMedia(video);
                 this.hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                this.hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) this.handleError();
+                });
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                // Для Safari
                 video.src = url;
                 video.play();
             }
         } else if (streamTypeUrl.includes('.ts') || streamTypeUrl.includes('.flv')) {
-            // Воспроизведение MPEG-TS или FLV
             if (mpegts.getFeatureList().mse) {
                 this.ts = mpegts.createPlayer({
                     type: streamTypeUrl.includes('.ts') ? 'mse' : 'flv',
@@ -797,18 +808,31 @@ const Player = {
                 });
                 this.ts.attachMediaElement(video);
                 this.ts.load();
-                this.ts.play();
+                this.ts.play().catch(() => this.handleError());
             }
         } else {
-            // Обычные форматы (MP4, WebM, MP3, FLAC)
             video.src = url;
-            video.play().catch(e => console.warn("Playback error:", e));
+            video.play().catch(() => this.handleError());
+        }
+    },
+
+    handleError() {
+        // Если видео не пошло и в ссылке был знак трубы, пробуем запустить "чистую" ссылку
+        if (!this.isRetrying && (this.lastUrl.includes('|') || this.lastUrl.includes('%7C'))) {
+            console.log("Плеер: Ошибка потока. Пробую запустить без заголовков...");
+            this.isRetrying = true;
+            const cleanUrl = this.lastUrl.split('|')[0].split('%7C')[0];
+            setTimeout(() => this.play(cleanUrl), 500);
+        } else {
+            this.isRetrying = false;
         }
     },
 
     stop() {
         const video = document.getElementById('main-video');
         if (!video) return;
+        video.onerror = null;
+        this.isRetrying = false;
         video.pause();
         video.removeAttribute('src');
         video.load();
