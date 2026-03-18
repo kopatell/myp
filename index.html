@@ -225,8 +225,12 @@ const App = {
 
         // Регистрация Service Worker для обхода Referer/User-Agent
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js')
-                .then(() => console.log('Service Worker: Активен'))
+            // Регистрация с принудительным обновлением при каждом запуске
+            navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+                .then(reg => {
+                    reg.update(); // Проверяем обновление файла sw.js на сервере
+                    console.log('Service Worker: Активен');
+                })
                 .catch(err => console.error('Service Worker: Ошибка', err));
         }
         
