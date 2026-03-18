@@ -334,6 +334,9 @@ const App = {
             this.renderSchedule(this.selectedChannel?.id);
         };
 
+        // Запуск живого обновления прогресса (раз в 30 сек)
+        setInterval(() => this.updateProgress(), 30000);
+
         if (m3u) {
             // Пытаемся быстро загрузить EPG из кэша IndexedDB
             const cachedEpg = await DB.load();
@@ -423,6 +426,27 @@ const App = {
         });
     },
 
+    updateProgress() {
+        const now = Date.now();
+        document.querySelectorAll('.channel-item').forEach(el => {
+            const chId = el.dataset.id;
+            if (!chId || !this.epg[chId]) return;
+
+            const prog = this.epg[chId].find(p => now >= p.start && now <= p.stop);
+            if (prog) {
+                const total = prog.stop - prog.start;
+                const elapsed = now - prog.start;
+                const progressWidth = Math.max(0, Math.min(100, (elapsed / total) * 100));
+
+                const titleEl = el.querySelector('.ch-now');
+                const progressEl = el.querySelector('.ch-progress-fill');
+
+                if (titleEl && titleEl.innerText !== prog.title) titleEl.innerText = prog.title;
+                if (progressEl) progressEl.style.width = progressWidth + '%';
+            }
+        });
+    },
+
     renderChannels() {
         const list = document.getElementById('list-channels');
         list.innerHTML = '';
@@ -437,6 +461,7 @@ const App = {
             if (this.selectedChannel && this.selectedChannel.id === ch.id) classes.push('is-selected');
             if (this.playingChannelId === ch.id) classes.push('is-playing');
             el.className = classes.join(' ');
+            el.dataset.id = ch.id;
             
             let nowTitle = 'Нет данных';
             let progressWidth = 0;
@@ -574,11 +599,29 @@ const App = {
         const rating = this.getRatingInfo(p.rating);
         const ratingHtml = rating ? `<span class="${rating.class}">${rating.label}</span>` : '';
 
+        // Умная обработка заголовка и подзаголовка
+        let fullTitle = p.title;
+        let sloganHtml = '';
+        
+        if (p.subTitle) {
+            // Если подзаголовка еще нет в основном названии
+            if (!p.title.toLowerCase().includes(p.subTitle.toLowerCase())) {
+                // Если подзаголовок короткий (название серии), добавляем к заголовку
+                if (p.subTitle.length < 40 && !p.subTitle.includes('«')) {
+                    fullTitle += `: ${p.subTitle}`;
+                } else {
+                    // Иначе выводим как слоган на второй строке
+                    sloganHtml = `<div style="font-style: italic; opacity: 0.7; margin: -5px 0 15px 0; font-size: 1.1em; color: #d0d0d0;">${p.subTitle}</div>`;
+                }
+            }
+        }
+
         // Собираем мета-информацию (Тех. инфо)
         const duration = this.formatDuration(p.durationMs);
         const metaHtml = `
             <div class="det-meta">
                 ${ratingHtml}
+                ${p.episode ? `<span style="background: var(--accent); color: #000;">${p.episode}</span>` : ''}
                 ${duration ? `<span>${duration}</span>` : ''}
                 ${p.date ? `<span>${p.date}</span>` : ''}
                 ${p.countries.map(c => `<span>${c}</span>`).join('')}
@@ -591,7 +634,8 @@ const App = {
 
         container.innerHTML = `
             <img class="fanart" id="det-img" src="${p.icon}" onload="this.style.display='block'">
-            <div class="det-title">${p.title}</div>
+            <div class="det-title">${fullTitle}</div>
+            ${sloganHtml}
             ${metaHtml}
             ${directors}
             ${actors}
@@ -698,6 +742,21 @@ const Parser = {
             const getTag = (name) => p.getElementsByTagName(name)[0]?.textContent || '';
             const getTags = (name) => Array.from(p.getElementsByTagName(name)).map(el => el.textContent);
 
+            // Парсинг номера серии (из разных форматов)
+            let episode = p.getElementsByTagName('episode-num');
+            let epText = '';
+            for (let ep of episode) {
+                let sys = ep.getAttribute('system');
+                let val = ep.textContent.trim();
+                if (sys === 'onscreen') epText = val;
+                else if (sys === 'xmltv_ns' && !epText) {
+                    let parts = val.split('.');
+                    let s = parseInt(parts[0]) + 1;
+                    let e = parseInt(parts[1]) + 1;
+                    if (!isNaN(s) && !isNaN(e)) epText = `S${s} E${e}`;
+                }
+            }
+
             result[chId].push({
                 start: start.getTime(),
                 stop: stop.getTime(),
@@ -705,6 +764,8 @@ const Parser = {
                 timeStart: this.formatTime(start),
                 timeStop: this.formatTime(stop),
                 title: getTag('title'),
+                subTitle: getTag('sub-title'),
+                episode: epText,
                 desc: getTag('desc'),
                 icon: p.getElementsByTagName('icon')[0]?.getAttribute('src') || '',
                 categories: getTags('category'),
@@ -713,7 +774,7 @@ const Parser = {
                 rating: p.getElementsByTagName('rating')[0]?.getElementsByTagName('value')[0]?.textContent || '',
                 directors: Array.from(p.getElementsByTagName('director')).map(el => el.textContent),
                 actors: Array.from(p.getElementsByTagName('actor')).map(el => el.textContent),
-                hasArchive: false // Будет сверяться с каналом
+                hasArchive: false
             });
         }
         return result;
