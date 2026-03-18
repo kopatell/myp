@@ -766,6 +766,11 @@ const Player = {
     isRetrying: false,
 
     play(url) {
+        // Если это новый канал (с трубой), сбрасываем заголовки в Tampermonkey
+        if (url.includes('|') || url.includes('%7C')) {
+            window.dispatchEvent(new CustomEvent('iptv-reset-headers'));
+        }
+        
         this.stop();
         const video = document.getElementById('main-video');
         if (!video) return;
