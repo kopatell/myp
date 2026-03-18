@@ -87,11 +87,40 @@
         #player-container { 
             width: 100%; 
             background: #000; 
-            display: block; /* Изменили с flex на block для точного позиционирования */
-            line-height: 0; /* Убирает лишние отступы снизу видео */
+            display: none; /* Скрыт по умолчанию */
+            line-height: 0; 
             border-bottom: 1px solid #222;
             flex-shrink: 0;
+            position: relative;
         }
+        
+        /* Кнопка остановки */
+        #btn-stop-player {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 20;
+            padding: 5px 12px;
+            background: rgba(244, 67, 54, 0.8);
+            color: white;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            display: none;
+        }
+        #player-container:hover #btn-stop-player, 
+        #btn-stop-player.focus { display: block; }
+
+        /* Состояния элементов списка */
+        .channel-item.is-selected, .prog-item.is-selected { 
+            border: 2px solid #fff !important; 
+            background: var(--surface-hover);
+        }
+        .channel-item.is-playing { 
+            background: rgba(79, 172, 254, 0.2) !important;
+            border-left: 4px solid var(--accent) !important;
+        }
+        .channel-item.is-playing .ch-name { color: var(--accent); }
         #main-video { 
             width: 100%; /* Теперь занимает всю ширину своей 30% колонки */
             aspect-ratio: 16 / 9; 
@@ -193,6 +222,7 @@
             
             <div class="col-schedule">
                 <div id="player-container">
+                    <div id="btn-stop-player" class="selector">✖ ОСТАНОВИТЬ</div>
                     <video id="main-video" controls autoplay class="selector"></video>
                 </div>
                 <div class="scrollable" id="list-schedule"></div>
@@ -219,6 +249,12 @@ const App = {
     groups: [],
     currentGroup: 'Все',
     selectedChannel: null,
+    playingChannelId: null,
+    selectedProgram: null,
+    playingProgramId: null,
+    playingChannelId: null,
+    selectedProgram: null,
+    playingProgramId: null,
 
     async init() {
         Nav.init();
@@ -244,6 +280,13 @@ const App = {
         document.getElementById('btn-save').onclick = () => this.loadData();
         document.getElementById('btn-to-settings').onclick = () => this.showScreen('settings');
         document.getElementById('mobile-back').onclick = () => this.goBack();
+        document.getElementById('btn-stop-player').onclick = () => {
+            Player.stop();
+            this.playingChannelId = null;
+            this.playingProgramId = null;
+            this.renderChannels();
+            this.renderSchedule(this.selectedChannel?.id);
+        };
 
         if (m3u) {
             // Пытаемся быстро загрузить EPG из кэша IndexedDB
@@ -338,7 +381,11 @@ const App = {
 
         filtered.forEach(ch => {
             const el = document.createElement('div');
-            el.className = 'channel-item selector';
+            
+            let classes = ['channel-item', 'selector'];
+            if (this.selectedChannel && this.selectedChannel.id === ch.id) classes.push('is-selected');
+            if (this.playingChannelId === ch.id) classes.push('is-playing');
+            el.className = classes.join(' ');
             
             let nowTitle = 'Нет данных';
             let progressWidth = 0;
@@ -380,10 +427,19 @@ const App = {
     },
 
     selectChannel(ch, element) {
-        this.selectedChannel = ch;
-        Player.play(ch.url);
-        this.renderSchedule(ch.id);
-        if (window.innerWidth <= 768) this.setMobileView('schedule');
+        // Если канал уже выбран (1-й клик был), то 2-й клик запускает видео
+        if (this.selectedChannel && this.selectedChannel.id === ch.id) {
+            this.playingChannelId = ch.id;
+            this.playingProgramId = null; // Сбрасываем метку архива
+            Player.play(ch.url);
+            this.renderChannels(); // Обновить метку "играет сейчас"
+        } else {
+            // Первый клик - просто выбор
+            this.selectedChannel = ch;
+            this.renderChannels(); // Обновить белую рамку
+            this.renderSchedule(ch.id);
+            if (window.innerWidth <= 768) this.setMobileView('schedule');
+        }
     },
 
     renderSchedule(channelId) {
@@ -398,7 +454,6 @@ const App = {
         }
 
         let lastDateStr = '';
-
         programs.forEach(p => {
             const pDate = new Date(p.start);
             const pDateStr = pDate.toDateString();
@@ -413,9 +468,16 @@ const App = {
             const isNow = now >= p.start && now <= p.stop;
             const isPast = now > p.stop;
             const hasArchive = isPast && this.selectedChannel?.archive;
+            const progId = p.start + p.title; // Уникальный ID для передачи
 
             const el = document.createElement('div');
-            el.className = `prog-item selector ${isNow ? 'active-now' : ''}`;
+            // Добавляем классы состояний
+            let classes = ['prog-item', 'selector'];
+            if (isNow) classes.push('active-now');
+            if (this.selectedProgram === progId) classes.push('is-selected');
+            if (this.playingProgramId === progId) classes.push('is-playing');
+            
+            el.className = classes.join(' ');
             
             const time = `${p.timeStart} - ${p.timeStop}`;
             el.innerHTML = `
@@ -425,13 +487,29 @@ const App = {
             `;
 
             el.onclick = () => {
-                this.renderDetails(p);
-                if (isNow) Player.play(this.selectedChannel.url);
-                else if (hasArchive) Player.play(Catchup.buildUrl(this.selectedChannel, p));
+                // Если передача уже выбрана - 2-й клик запускает видео
+                if (this.selectedProgram === progId) {
+                    if (isNow) {
+                        this.playingChannelId = this.selectedChannel.id;
+                        this.playingProgramId = null;
+                        Player.play(this.selectedChannel.url);
+                    } else if (hasArchive) {
+                        this.playingChannelId = this.selectedChannel.id;
+                        this.playingProgramId = progId;
+                        Player.play(Catchup.buildUrl(this.selectedChannel, p));
+                    }
+                    this.renderSchedule(channelId); // Обновить метку "играет"
+                    this.renderChannels(); // Чтобы снять/поставить метку с канала
+                } else {
+                    // 1-й клик - выбор и детали
+                    this.selectedProgram = progId;
+                    this.renderDetails(p);
+                    this.renderSchedule(channelId); // Обновить белую рамку
+                }
             };
             list.appendChild(el);
 
-            if (isNow) {
+            if (isNow && !this.selectedProgram) {
                 setTimeout(() => el.scrollIntoView({behavior: 'smooth', block: 'center'}), 100);
                 this.renderDetails(p); 
             }
@@ -773,9 +851,12 @@ const Player = {
         const video = document.getElementById('main-video');
         if (!video) return;
 
+        // Показываем контейнер плеера
+        const container = document.getElementById('player-container');
+        if (container) container.style.display = 'block';
+
         this.lastUrl = url;
         
-        // Ошибка на самом элементе видео
         video.onerror = (e) => {
             console.error("Video Element Error:", e);
             this.handleError();
@@ -834,9 +915,8 @@ const Player = {
             console.log("Fallback: пробуем чистую ссылку...");
             
             setTimeout(() => {
-                // Перед повторным запуском полностью сбрасываем состояние
                 this.stop();
-                this.isRetrying = true; // восстанавливаем флаг после stop()
+                this.isRetrying = true;
                 this.play(cleanUrl);
             }, 1500);
         }
@@ -855,6 +935,10 @@ const Player = {
             video.load();
         }
         this.isRetrying = false;
+        
+        // Скрываем контейнер плеера
+        const container = document.getElementById('player-container');
+        if (container) container.style.display = 'none';
     }
 };
 
