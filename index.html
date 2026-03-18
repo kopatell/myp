@@ -772,33 +772,38 @@ const Player = {
 
         this.lastUrl = url;
         
-        // Слушаем ошибки для автоматического "отката" (Fallback)
-        video.onerror = () => this.handleError();
+        // Ошибка на самом элементе видео
+        video.onerror = (e) => {
+            console.error("Video Element Error:", e);
+            this.handleError();
+        };
 
-        const lowUrl = url.toLowerCase();
-        // Часть ссылки до знака трубы
-        const streamTypeUrl = lowUrl.split('|')[0] || lowUrl.split('%7c')[0];
+        const streamTypeUrl = url.split('|')[0].split('%7C')[0].toLowerCase();
 
         if (streamTypeUrl.includes('.mpd')) {
             this.dash = dashjs.MediaPlayer().create();
             this.dash.initialize(video, url, true);
         } else if (streamTypeUrl.includes('.m3u8')) {
             if (Hls.isSupported()) {
-                // Если есть Tampermonkey, помогаем библиотеке hls.js (через xhrSetup)
                 this.hls = new Hls({
-                    xhrSetup: (xhr, xhrUrl) => {
-                        xhr.withCredentials = false;
-                    }
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    xhrSetup: (xhr) => { xhr.withCredentials = false; }
                 });
                 this.hls.loadSource(url);
                 this.hls.attachMedia(video);
-                this.hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    video.play().catch(() => {});
+                });
                 this.hls.on(Hls.Events.ERROR, (event, data) => {
-                    if (data.fatal) this.handleError();
+                    if (data.fatal) {
+                        console.warn("HLS Fatal Error:", data.type);
+                        this.handleError();
+                    }
                 });
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 video.src = url;
-                video.play();
+                video.play().catch(() => {});
             }
         } else if (streamTypeUrl.includes('.ts') || streamTypeUrl.includes('.flv')) {
             if (mpegts.getFeatureList().mse) {
@@ -821,32 +826,32 @@ const Player = {
         
         const hasPipe = this.lastUrl.includes('|') || this.lastUrl.includes('%7C');
         if (hasPipe) {
-            console.log("Плеер: Ошибка потока. Пробую запустить без заголовков...");
             this.isRetrying = true;
             const cleanUrl = this.lastUrl.split('|')[0].split('%7C')[0];
+            console.log("Fallback: пробуем чистую ссылку...");
             
-            // Очищаем плеер перед повтором, чтобы избежать AbortError
-            const video = document.getElementById('main-video');
-            if (video) { video.src = ''; video.load(); }
-
             setTimeout(() => {
-                this.isRetrying = true; // Сохраняем флаг
+                // Перед повторным запуском полностью сбрасываем состояние
+                this.stop();
+                this.isRetrying = true; // восстанавливаем флаг после stop()
                 this.play(cleanUrl);
-            }, 1000);
+            }, 1500);
         }
     },
 
     stop() {
         const video = document.getElementById('main-video');
-        if (!video) return;
-        video.onerror = null;
-        this.isRetrying = false;
-        video.pause();
-        video.removeAttribute('src');
-        video.load();
         if (this.hls) { this.hls.destroy(); this.hls = null; }
         if (this.dash) { this.dash.reset(); this.dash = null; }
         if (this.ts) { this.ts.destroy(); this.ts = null; }
+        
+        if (video) {
+            video.onerror = null;
+            video.pause();
+            video.removeAttribute('src');
+            video.load();
+        }
+        this.isRetrying = false;
     }
 };
 
