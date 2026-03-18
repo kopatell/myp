@@ -58,10 +58,31 @@
         .group-item { padding: 6px 15px; background: var(--surface); border-radius: 20px; white-space: nowrap; font-size: 0.9em; }
         .group-item.active { background: var(--accent); color: #fff; }
 
-        .main-layout { display: flex; flex: 1; overflow: hidden; background: var(--bg); }
+        .main-layout { display: flex; flex: 1; overflow: hidden; background: var(--bg); position: relative; }
+
+        /* Глобальный плеер */
+        #player-container { 
+            background: #000; 
+            display: none; 
+            line-height: 0; 
+            border-bottom: 1px solid #222;
+            z-index: 100;
+        }
+
+        /* Десктопная верстка плеера (над средней колонкой) */
+        @media (min-width: 769px) {
+            #player-container { 
+                position: absolute;
+                top: 0;
+                left: 20%; /* Ширина первой колонки */
+                width: 30%; /* Ширина второй колонки */
+            }
+            /* Создаем отступ в списке передач, чтобы видео его не закрывало */
+            .col-schedule { padding-top: calc(30vw * 0.5625); } 
+        }
 
         /* Колонка 1: Список каналов (Узкая) */
-        .col-channels { width: 20%; border-right: 1px solid #222; display: flex; flex-direction: column; }
+        .col-channels { width: 20%; border-right: 1px solid #222; display: flex; flex-direction: column; z-index: 5; }
         .channel-item { display: flex; align-items: center; padding: 12px; gap: 15px; border-bottom: 1px solid #1c1f24; }
         .ch-logo-container { 
             width: 50px; height: 50px; position: relative; flex-shrink: 0; 
@@ -80,19 +101,8 @@
         .ch-progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s ease; }
         .archive-marker { color: #ff9800; font-size: 0.9em; font-weight: normal; }
 
-        /* Колонка 2: Программа передач + Плеер (Ровно 30% экрана) */
-        .col-schedule { width: 30%; border-right: 1px solid #222; display: flex; flex-direction: column; background: rgba(0,0,0,0.1); }
-        
-        /* Стили контейнера плеера */
-        #player-container { 
-            width: 100%; 
-            background: #000; 
-            display: none; /* Скрыт по умолчанию */
-            line-height: 0; 
-            border-bottom: 1px solid #222;
-            flex-shrink: 0;
-            position: relative;
-        }
+        /* Колонка 2: Программа передач (Ровно 30% экрана) */
+        .col-schedule { width: 30%; border-right: 1px solid #222; display: flex; flex-direction: column; background: rgba(0,0,0,0.1); z-index: 5; }
         
         /* Кнопка остановки */
         #btn-stop-player {
@@ -169,10 +179,20 @@
 
         /* Адаптация для мобильных устройств */
         @media (max-width: 768px) {
+            .main-layout { flex-direction: column; overflow: hidden; }
+            
+            #player-container { 
+                width: 100%; 
+                position: sticky; 
+                top: 0; 
+            }
+
             .col-channels, .col-schedule, .col-details { 
                 width: 100% !important; 
                 display: none !important; 
                 border-right: none;
+                flex: 1;
+                overflow-y: auto;
             }
             
             /* Классы для управления видимостью колонок на мобильных */
@@ -215,16 +235,17 @@
         </header>
 
         <div class="main-layout">
+            <div id="player-container">
+                <div id="btn-stop-player" class="selector">✖ ОСТАНОВИТЬ</div>
+                <video id="main-video" controls autoplay class="selector"></video>
+            </div>
+
             <!-- Колонки -->
             <div class="col-channels">
                 <div class="scrollable" id="list-channels"></div>
             </div>
             
             <div class="col-schedule">
-                <div id="player-container">
-                    <div id="btn-stop-player" class="selector">✖ ОСТАНОВИТЬ</div>
-                    <video id="main-video" controls autoplay class="selector"></video>
-                </div>
                 <div class="scrollable" id="list-schedule"></div>
             </div>
 
@@ -255,6 +276,23 @@ const App = {
 
     async init() {
         Nav.init();
+
+        // Инициализация жестов (Swipe)
+        let touchStartX = 0;
+        const layout = document.querySelector('.main-layout');
+        layout.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, {passive: true});
+        layout.addEventListener('touchend', e => {
+            const touchEndX = e.changedTouches[0].screenX;
+            const diff = touchStartX - touchEndX;
+            if (Math.abs(diff) > 60) { // Порог свайпа
+                if (diff > 0) { // Свайп влево -> Вперед
+                    if (this.currentView === 'channels') this.setMobileView('schedule');
+                    else if (this.currentView === 'schedule') this.setMobileView('details');
+                } else { // Свайп вправо -> Назад
+                    this.goBack();
+                }
+            }
+        }, {passive: true});
 
         // Слушатель системной кнопки "Назад"
         window.addEventListener('popstate', (e) => {
