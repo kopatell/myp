@@ -58,10 +58,31 @@
         .group-item { padding: 6px 15px; background: var(--surface); border-radius: 20px; white-space: nowrap; font-size: 0.9em; }
         .group-item.active { background: var(--accent); color: #fff; }
 
-        .main-layout { display: flex; flex: 1; overflow: hidden; background: var(--bg); }
+        .main-layout { display: flex; flex: 1; overflow: hidden; background: var(--bg); position: relative; }
+
+        /* Глобальный плеер */
+        #player-container { 
+            background: #000; 
+            display: none; 
+            line-height: 0; 
+            border-bottom: 1px solid #222;
+            z-index: 100;
+        }
+
+        /* Десктопная верстка плеера (над средней колонкой) */
+        @media (min-width: 769px) {
+            #player-container { 
+                position: absolute;
+                top: 0;
+                left: 20%; /* Ширина первой колонки */
+                width: 30%; /* Ширина второй колонки */
+            }
+            /* Создаем отступ в списке передач, чтобы видео его не закрывало */
+            .col-schedule { padding-top: calc(30vw * 0.5625); } 
+        }
 
         /* Колонка 1: Список каналов (Узкая) */
-        .col-channels { width: 20%; border-right: 1px solid #222; display: flex; flex-direction: column; }
+        .col-channels { width: 20%; border-right: 1px solid #222; display: flex; flex-direction: column; z-index: 5; }
         .channel-item { display: flex; align-items: center; padding: 12px; gap: 15px; border-bottom: 1px solid #1c1f24; }
         .ch-logo-container { 
             width: 50px; height: 50px; position: relative; flex-shrink: 0; 
@@ -80,19 +101,8 @@
         .ch-progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s ease; }
         .archive-marker { color: #ff9800; font-size: 0.9em; font-weight: normal; }
 
-        /* Колонка 2: Программа передач + Плеер (Ровно 30% экрана) */
-        .col-schedule { width: 30%; border-right: 1px solid #222; display: flex; flex-direction: column; background: rgba(0,0,0,0.1); }
-        
-        /* Стили контейнера плеера */
-        #player-container { 
-            width: 100%; 
-            background: #000; 
-            display: none; /* Скрыт по умолчанию */
-            line-height: 0; 
-            border-bottom: 1px solid #222;
-            flex-shrink: 0;
-            position: relative;
-        }
+        /* Колонка 2: Программа передач (Ровно 30% экрана) */
+        .col-schedule { width: 30%; border-right: 1px solid #222; display: flex; flex-direction: column; background: rgba(0,0,0,0.1); z-index: 5; }
         
         /* Кнопка остановки */
         #btn-stop-player {
@@ -169,10 +179,20 @@
 
         /* Адаптация для мобильных устройств */
         @media (max-width: 768px) {
+            .main-layout { flex-direction: column; overflow: hidden; }
+            
+            #player-container { 
+                width: 100%; 
+                position: sticky; 
+                top: 0; 
+            }
+
             .col-channels, .col-schedule, .col-details { 
                 width: 100% !important; 
                 display: none !important; 
                 border-right: none;
+                flex: 1;
+                overflow-y: auto;
             }
             
             /* Классы для управления видимостью колонок на мобильных */
@@ -215,16 +235,17 @@
         </header>
 
         <div class="main-layout">
+            <div id="player-container">
+                <div id="btn-stop-player" class="selector">✖ ОСТАНОВИТЬ</div>
+                <video id="main-video" controls autoplay class="selector"></video>
+            </div>
+
             <!-- Колонки -->
             <div class="col-channels">
                 <div class="scrollable" id="list-channels"></div>
             </div>
             
             <div class="col-schedule">
-                <div id="player-container">
-                    <div id="btn-stop-player" class="selector">✖ ОСТАНОВИТЬ</div>
-                    <video id="main-video" controls autoplay class="selector"></video>
-                </div>
                 <div class="scrollable" id="list-schedule"></div>
             </div>
 
@@ -252,12 +273,35 @@ const App = {
     playingChannelId: null,
     selectedProgram: null,
     playingProgramId: null,
-    playingChannelId: null,
-    selectedProgram: null,
-    playingProgramId: null,
 
     async init() {
         Nav.init();
+
+        // Инициализация жестов (Swipe)
+        let touchStartX = 0;
+        const layout = document.querySelector('.main-layout');
+        layout.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, {passive: true});
+        layout.addEventListener('touchend', e => {
+            const touchEndX = e.changedTouches[0].screenX;
+            const diff = touchStartX - touchEndX;
+            if (Math.abs(diff) > 60) { // Порог свайпа
+                if (diff > 0) { // Свайп влево -> Вперед
+                    if (this.currentView === 'channels') this.setMobileView('schedule');
+                    else if (this.currentView === 'schedule') this.setMobileView('details');
+                } else { // Свайп вправо -> Назад
+                    this.goBack();
+                }
+            }
+        }, {passive: true});
+
+        // Слушатель системной кнопки "Назад"
+        window.addEventListener('popstate', (e) => {
+            if (this.currentView === 'details') {
+                this.setMobileView('schedule', true);
+            } else if (this.currentView === 'schedule') {
+                this.setMobileView('channels', true);
+            }
+        });
 
         // Регистрация Service Worker для обхода Referer/User-Agent
         if ('serviceWorker' in navigator) {
@@ -316,11 +360,16 @@ const App = {
         Nav.resetFocus();
     },
 
-    setMobileView(view) {
+    setMobileView(view, isBackAction = false) {
         const layout = document.querySelector('.main-layout');
         layout.classList.remove('view-channels', 'view-schedule', 'view-details');
         layout.classList.add('view-' + view);
         this.currentView = view;
+        
+        // Добавляем запись в историю, если это не переход по кнопке "Назад"
+        if (!isBackAction) {
+            history.pushState({view: view}, '');
+        }
         
         // Скрываем кнопку Назад на главном списке каналов
         document.getElementById('mobile-back').style.visibility = (view === 'channels') ? 'hidden' : 'visible';
@@ -598,7 +647,7 @@ const App = {
  */
 const Parser = {
     m3u(text) {
-        const lines = text.split('\n');
+        const lines = text.split(/\r?\n/);
         const channels = [];
         let current = null;
 
@@ -669,14 +718,18 @@ const Parser = {
     },
 
     parseDate(str) {
-        // Формат: 20260315120000 +0300
-        const m = str.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})/);
+        // Гибкий формат: YYYYMMDDHHMM[SS] [+/-HHMM]
+        const m = str.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?\s*([+-]\d{4})?/);
         let date = new Date();
         if (m) {
-            const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7].slice(0,3)}:${m[7].slice(3)}`;
+            const sec = m[6] || '00';
+            const tz = m[7] ? `${m[7].slice(0,3)}:${m[7].slice(3)}` : 'Z';
+            const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${sec}${tz}`;
             date = new Date(iso);
         }
         
+        if (isNaN(date.getTime())) date = new Date();
+
         // Применяем пользовательский сдвиг (Timezone Offset)
         const offsetHours = parseInt(localStorage.getItem('guide_tz') || '0');
         if (offsetHours !== 0) {
@@ -727,6 +780,10 @@ const Nav = {
     },
 
     move(key) {
+        if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') {
+            return;
+        }
+
         if (key === 'Enter') {
             this.current?.click();
             return;
@@ -756,7 +813,17 @@ const Nav = {
             if (key === 'ArrowRight' && dx > 0 && Math.abs(dy) < Math.abs(dx)) valid = true;
 
             if (valid) {
-                const diff = Math.sqrt(dx*dx + dy*dy);
+                // Умный расчет дистанции: штрафуем отклонение от оси движения
+                // При движении по горизонтали (Left/Right) увеличиваем вес вертикального смещения и наоборот
+                const penalty = 5; // Коэффициент штрафа
+                let diff;
+                
+                if (key === 'ArrowLeft' || key === 'ArrowRight') {
+                    diff = Math.abs(dx) + (Math.abs(dy) * penalty);
+                } else {
+                    diff = Math.abs(dy) + (Math.abs(dx) * penalty);
+                }
+
                 if (diff < minDiff) {
                     minDiff = diff;
                     best = el;
@@ -810,26 +877,34 @@ const Catchup = {
     buildUrl(channel, p) {
         let source = channel.catchupSource;
         if (!source) return channel.url;
+
+        // Разделяем URL и параметры заголовков для SW
+        const parts = channel.url.split('|');
+        let baseUrl = parts[0];
+        const swParams = parts[1] ? '|' + parts[1] : '';
         
         const startTS = Math.floor(p.start / 1000);
         const endTS = Math.floor(p.stop / 1000);
         const dur = Math.round((p.stop - p.start) / 1000);
 
         // Замена плейсхолдеров
-        let res = source
-            .replace('${start}', startTS).replace('{utc}', startTS)
-            .replace('${end}', endTS).replace('{lutc}', endTS)
-            .replace('${duration}', dur).replace('{offset}', '0');
+        let query = source
+            .replace(/\${start}/g, startTS).replace(/{utc}/g, startTS)
+            .replace(/\${end}/g, endTS).replace(/{lutc}/g, endTS)
+            .replace(/\${duration}/g, dur).replace(/{offset}/g, '0');
 
-        if (res.startsWith('?') || res.startsWith('&')) {
-            const sep = channel.url.includes('?') ? '&' : '?';
-            return channel.url + sep + res.replace(/^[?&]/, '');
-        } else if (res.includes('://')) {
-            return res;
+        let finalUrl = '';
+        if (query.startsWith('?') || query.startsWith('&')) {
+            const sep = baseUrl.includes('?') ? '&' : '?';
+            finalUrl = baseUrl + sep + query.replace(/^[?&]/, '');
+        } else if (query.includes('://')) {
+            finalUrl = query;
         } else {
-            const sep = channel.url.endsWith('/') ? '' : '/';
-            return channel.url + (channel.catchupType === 'append' ? res : sep + res);
+            const sep = baseUrl.endsWith('/') ? '' : '/';
+            finalUrl = baseUrl + (channel.catchupType === 'append' ? query : sep + query);
         }
+
+        return finalUrl + swParams;
     }
 };
 
@@ -915,10 +990,74 @@ const Player = {
             console.log("Fallback: пробуем чистую ссылку...");
             
             setTimeout(() => {
+                const retryState = this.isRetrying;
                 this.stop();
-                this.isRetrying = true;
-                this.play(cleanUrl);
+                this.isRetrying = retryState; 
+                this.play(cleanUrl, true);
             }, 1500);
+        }
+    },
+
+    play(url, isRetry = false) {
+        if (!isRetry) this.isRetrying = false;
+        // Принудительно сбрасываем заголовки при любом старте нового видео
+        window.dispatchEvent(new CustomEvent('iptv-reset-headers'));
+
+        this.stop();
+        const video = document.getElementById('main-video');
+        if (!video) return;
+
+        // Показываем контейнер плеера
+        const container = document.getElementById('player-container');
+        if (container) container.style.display = 'block';
+
+        this.lastUrl = url;
+        
+        video.onerror = (e) => {
+            console.error("Video Element Error:", e);
+            this.handleError();
+        };
+
+        const streamTypeUrl = url.split('|')[0].split('%7C')[0].toLowerCase();
+
+        if (streamTypeUrl.includes('.mpd')) {
+            this.dash = dashjs.MediaPlayer().create();
+            this.dash.initialize(video, url, true);
+        } else if (streamTypeUrl.includes('.m3u8')) {
+            if (Hls.isSupported()) {
+                this.hls = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    xhrSetup: (xhr) => { xhr.withCredentials = false; }
+                });
+                this.hls.loadSource(url);
+                this.hls.attachMedia(video);
+                this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    video.play().catch(() => {});
+                });
+                this.hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) {
+                        console.warn("HLS Fatal Error:", data.type);
+                        this.handleError();
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = url;
+                video.play().catch(() => {});
+            }
+        } else if (streamTypeUrl.includes('.ts') || streamTypeUrl.includes('.flv')) {
+            if (mpegts.getFeatureList().mse) {
+                this.ts = mpegts.createPlayer({
+                    type: streamTypeUrl.includes('.ts') ? 'mse' : 'flv',
+                    url: url
+                });
+                this.ts.attachMediaElement(video);
+                this.ts.load();
+                this.ts.play().catch(() => this.handleError());
+            }
+        } else {
+            video.src = url;
+            video.play().catch(() => this.handleError());
         }
     },
 
@@ -934,7 +1073,6 @@ const Player = {
             video.removeAttribute('src');
             video.load();
         }
-        this.isRetrying = false;
         
         // Скрываем контейнер плеера
         const container = document.getElementById('player-container');
