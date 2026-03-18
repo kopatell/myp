@@ -817,14 +817,22 @@ const Player = {
     },
 
     handleError() {
-        // Если видео не пошло и в ссылке был знак трубы, пробуем запустить "чистую" ссылку
-        if (!this.isRetrying && (this.lastUrl.includes('|') || this.lastUrl.includes('%7C'))) {
+        if (this.isRetrying) return;
+        
+        const hasPipe = this.lastUrl.includes('|') || this.lastUrl.includes('%7C');
+        if (hasPipe) {
             console.log("Плеер: Ошибка потока. Пробую запустить без заголовков...");
             this.isRetrying = true;
             const cleanUrl = this.lastUrl.split('|')[0].split('%7C')[0];
-            setTimeout(() => this.play(cleanUrl), 500);
-        } else {
-            this.isRetrying = false;
+            
+            // Очищаем плеер перед повтором, чтобы избежать AbortError
+            const video = document.getElementById('main-video');
+            if (video) { video.src = ''; video.load(); }
+
+            setTimeout(() => {
+                this.isRetrying = true; // Сохраняем флаг
+                this.play(cleanUrl);
+            }, 1000);
         }
     },
 
