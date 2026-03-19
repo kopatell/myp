@@ -34,7 +34,7 @@
 
         /* Навигация (Пульт) */
         .selector { cursor: pointer; border: 2px solid transparent; transition: all 0.1s ease-in-out; }
-        .selector.focus { border-color: var(--focus-border); background: var(--surface-hover); transform: scale(1.01); z-index: 10; outline: none; }
+        .selector.focus { border-color: var(--focus-border); background: transparent; transform: none; z-index: 10; outline: none; }
 
         /* Экраны */
         .screen { display: none; height: 100vh; width: 100vw; }
@@ -145,8 +145,8 @@
 
         /* Состояния элементов списка */
         .channel-item.is-selected, .prog-item.is-selected { 
-            border: 2px solid #fff !important; 
-            background: var(--surface-hover);
+            border: 2px solid var(--text-muted) !important; 
+            background: transparent !important;
         }
         .channel-item.is-playing { 
             background: rgba(79, 172, 254, 0.2) !important;
@@ -187,6 +187,16 @@
         .det-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; font-size: 0.9em; color: var(--text-muted); font-weight: bold; }
         .det-meta span { background: rgba(255,255,255,0.05); padding: 3px 8px; border-radius: 4px; }
         
+        /* Подсветка поиска */
+        .search-highlight { 
+            background: #ffeb3b; 
+            color: #000; 
+            padding: 0 2px; 
+            border-radius: 2px; 
+            font-weight: bold;
+            font-style: normal;
+        }
+
         /* Цвета рейтингов */
         .rating-green { background: #4caf50 !important; color: #000 !important; }
         .rating-yellow { background: #ffeb3b !important; color: #000 !important; }
@@ -548,8 +558,8 @@ const App = {
                     ${ch.name[0].toUpperCase()}${ch.logo ? `<img class="ch-logo" src="${ch.logo}" onerror="this.style.opacity=0">` : ''}
                 </div>
                 <div class="ch-info">
-                    <div class="ch-name">${ch.name} ${ch.archive ? '<span class="archive-marker">↺</span>' : ''}</div>
-                    <div class="ch-now">${nowTitle}</div>
+                    <div class="ch-name">${this.highlight(ch.name, this.searchQuery)} ${ch.archive ? '<span class="archive-marker">↺</span>' : ''}</div>
+                    <div class="ch-now">${this.highlight(nowTitle, this.searchQuery)}</div>
                     <div class="ch-progress-bg"><div class="ch-progress-fill" style="width: ${progressWidth}%"></div></div>
                 </div>
             `;
@@ -630,7 +640,7 @@ const App = {
             el.innerHTML = `
                 ${hasArchive ? '<span class="archive-icon">АРХИВ</span>' : ''}
                 <div class="prog-time">${p.timeStart} - ${p.timeStop} ${p.channelName ? `<span style="color:var(--accent); margin-left:10px;">[${p.channelName}]</span>` : ''}</div>
-                <div class="prog-title">${p.title}</div>
+                <div class="prog-title">${this.highlight(p.title, this.searchQuery)}</div>
             `;
 
             el.onclick = () => {
@@ -752,6 +762,13 @@ const App = {
         if (hours > 0) res += hours + ' ч. ';
         if (minutes > 0 || hours === 0) res += minutes + ' мин.';
         return res.trim();
+    },
+
+    highlight(text, q) {
+        if (!q || !text) return text;
+        const escapedQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escapedQ})`, 'gi');
+        return text.toString().replace(regex, '<mark class="search-highlight">$1</mark>');
     },
 
     adjustVolume(delta) {
