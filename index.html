@@ -253,7 +253,10 @@
                 <label style="flex: 1;">Смещение времени (EPG), в часах:</label>
                 <input type="number" id="input-tz" value="0" style="width: 80px; padding: 10px; background: #000; border: 1px solid #333; color: #fff; border-radius: 4px;">
             </div>
-            <div class="btn-save selector" id="btn-save">Загрузить данные</div>
+            <div style="display: flex; gap: 15px;">
+                <div class="btn-save selector" id="btn-save" style="flex: 2;">Загрузить данные</div>
+                <div class="selector" id="btn-clear-epg" style="flex: 1; padding: 15px; background: #f44336; color: #fff; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.2em;">Очистить EPG</div>
+            </div>
         </div>
     </div>
 
@@ -386,13 +389,18 @@ const App = {
         }
         
         const m3u = localStorage.getItem('guide_m3u') || '';
-        const epgText = localStorage.getItem('guide_epg') || '';
         const tz = localStorage.getItem('guide_tz') || '0';
         document.getElementById('input-m3u').value = m3u;
-        document.getElementById('input-epg').value = epgText;
         document.getElementById('input-tz').value = tz;
 
+        // EPG текст слишком большой для localStorage, проверяем базу
+        const cachedEpg = await DB.load();
+        if (cachedEpg) {
+            document.getElementById('input-epg').placeholder = "EPG уже загружен в базу данных. Вставьте новый текст только если нужно обновить программу.";
+        }
+
         document.getElementById('btn-save').onclick = () => this.loadData();
+        document.getElementById('btn-clear-epg').onclick = () => this.clearEPG();
         document.getElementById('btn-to-settings').onclick = () => this.showScreen('settings');
         document.getElementById('mobile-back').onclick = () => this.goBack();
         document.getElementById('btn-stop-player').onclick = () => {
@@ -459,16 +467,22 @@ const App = {
         const epgText = document.getElementById('input-epg').value;
         const tzValue = document.getElementById('input-tz').value;
 
+        // Сохраняем в localStorage только маленькие данные
         localStorage.setItem('guide_m3u', m3uText);
-        localStorage.setItem('guide_epg', epgText);
         localStorage.setItem('guide_tz', tzValue);
 
         this.channels = Parser.m3u(m3uText);
-        this.epg = Parser.xmltv(epgText);
-
-        // Сохраняем распарсенную программу в быструю базу данных
-        if (Object.keys(this.epg).length > 0) {
-            await DB.save(this.epg);
+        
+        if (epgText.trim()) {
+            this.epg = Parser.xmltv(epgText);
+            // Сохраняем распарсенную программу в быструю базу данных (IndexedDB)
+            if (Object.keys(this.epg).length > 0) {
+                await DB.save(this.epg);
+            }
+        } else {
+            // Если текст не вставили, пробуем взять то, что уже есть в базе
+            const cached = await DB.load();
+            if (cached) this.epg = cached;
         }
 
         const gSet = new Set(['Все']);
@@ -796,6 +810,17 @@ const App = {
             clearTimeout(this.volTimer);
             this.volTimer = setTimeout(() => hud.style.display = 'none', 2000);
         }
+    },
+
+    async clearEPG() {
+        if (confirm('Вы уверены, что хотите полностью удалить программу передач из памяти?')) {
+            await DB.clear();
+            this.epg = {};
+            document.getElementById('input-epg').value = '';
+            document.getElementById('input-epg').placeholder = "Вставьте текст XMLTV (EPG) сюда...";
+            alert('База EPG очищена');
+            this.renderChannels();
+        }
     }
 };
 
@@ -1061,6 +1086,13 @@ const DB = {
             request.onsuccess = () => resolve(request.result || null);
             request.onerror = () => resolve(null);
         });
+    },
+
+    async clear() {
+        const db = await this.open();
+        const tx = db.transaction(this.storeName, 'readwrite');
+        tx.objectStore(this.storeName).delete('current_epg');
+        return new Promise((resolve) => tx.oncomplete = () => resolve());
     }
 };
 
