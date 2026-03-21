@@ -1496,7 +1496,7 @@ const Player = {
         } else if (streamTypeUrl.includes('.m3u8')) {
             if (Hls.isSupported()) {
                 this.hls = new Hls({
-                    enableWorker: true,
+                    enableWorker: false,
                     lowLatencyMode: true,
                     xhrSetup: (xhr) => { xhr.withCredentials = false; }
                 });
@@ -1579,7 +1579,7 @@ const Player = {
         } else if (streamTypeUrl.includes('.m3u8')) {
             if (Hls.isSupported()) {
                 this.hls = new Hls({
-                    enableWorker: true,
+                    enableWorker: false,
                     lowLatencyMode: true,
                     xhrSetup: (xhr) => { xhr.withCredentials = false; }
                 });
