@@ -1469,34 +1469,35 @@ const Player = {
     lastUrl: '',
     isRetrying: false,
 
-    play(url) {
-        // Принудительно сбрасываем заголовки при любом старте нового видео
+    play(url, isRetry = false) {
+        if (!isRetry) this.isRetrying = false;
+        
+        // Сброс заголовков в бридже перед новой сессией
         window.dispatchEvent(new CustomEvent('iptv-reset-headers'));
 
         this.stop();
         const video = document.getElementById('main-video');
-        if (!video) return;
-
-        // Показываем контейнер плеера
         const container = document.getElementById('player-container');
+        const layout = document.querySelector('.main-layout');
+        
+        if (!video) return;
         if (container) container.style.display = 'block';
+        if (layout) layout.classList.add('player-active');
 
         this.lastUrl = url;
         
-        video.onerror = (e) => {
-            console.error("Video Element Error:", e);
-            this.handleError();
-        };
+        video.onerror = () => this.handleError();
 
-        const streamTypeUrl = url.split('|')[0].split('%7C')[0].toLowerCase();
+        // Определение типа потока
+        const cleanUrl = url.split('|')[0].split('%7C')[0].toLowerCase();
 
-        if (streamTypeUrl.includes('.mpd')) {
+        if (cleanUrl.includes('.mpd')) {
             this.dash = dashjs.MediaPlayer().create();
             this.dash.initialize(video, url, true);
-        } else if (streamTypeUrl.includes('.m3u8')) {
+        } else if (cleanUrl.includes('.m3u8')) {
             if (Hls.isSupported()) {
                 this.hls = new Hls({
-                    enableWorker: false,
+                    enableWorker: true,
                     lowLatencyMode: true,
                     xhrSetup: (xhr) => { xhr.withCredentials = false; }
                 });
@@ -1506,19 +1507,16 @@ const Player = {
                     video.play().catch(() => {});
                 });
                 this.hls.on(Hls.Events.ERROR, (event, data) => {
-                    if (data.fatal) {
-                        console.warn("HLS Fatal Error:", data.type);
-                        this.handleError();
-                    }
+                    if (data.fatal) this.handleError();
                 });
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 video.src = url;
                 video.play().catch(() => {});
             }
-        } else if (streamTypeUrl.includes('.ts') || streamTypeUrl.includes('.flv')) {
+        } else if (cleanUrl.includes('.ts') || cleanUrl.includes('.flv')) {
             if (mpegts.getFeatureList().mse) {
                 this.ts = mpegts.createPlayer({
-                    type: streamTypeUrl.includes('.ts') ? 'mse' : 'flv',
+                    type: cleanUrl.includes('.ts') ? 'mse' : 'flv',
                     url: url
                 });
                 this.ts.attachMediaElement(video);
@@ -1533,85 +1531,11 @@ const Player = {
 
     handleError() {
         if (this.isRetrying) return;
-        
-        const hasPipe = this.lastUrl.includes('|') || this.lastUrl.includes('%7C');
-        if (hasPipe) {
-            this.isRetrying = true;
-            const cleanUrl = this.lastUrl.split('|')[0].split('%7C')[0];
-            console.log("Fallback: пробуем чистую ссылку...");
-            
-            setTimeout(() => {
-                const retryState = this.isRetrying;
-                this.stop();
-                this.isRetrying = retryState; 
-                this.play(cleanUrl, true);
-            }, 1500);
-        }
-    },
-
-    play(url, isRetry = false) {
-        if (!isRetry) this.isRetrying = false;
-        // Принудительно сбрасываем заголовки при любом старте нового видео
-        window.dispatchEvent(new CustomEvent('iptv-reset-headers'));
-
-        this.stop();
-        const video = document.getElementById('main-video');
-        if (!video) return;
-
-        // Показываем контейнер плеера и ставим метку активности
-        const container = document.getElementById('player-container');
-        const layout = document.querySelector('.main-layout');
-        if (container) container.style.display = 'block';
-        if (layout) layout.classList.add('player-active');
-
-        this.lastUrl = url;
-        
-        video.onerror = (e) => {
-            console.error("Video Element Error:", e);
-            this.handleError();
-        };
-
-        const streamTypeUrl = url.split('|')[0].split('%7C')[0].toLowerCase();
-
-        if (streamTypeUrl.includes('.mpd')) {
-            this.dash = dashjs.MediaPlayer().create();
-            this.dash.initialize(video, url, true);
-        } else if (streamTypeUrl.includes('.m3u8')) {
-            if (Hls.isSupported()) {
-                this.hls = new Hls({
-                    enableWorker: false,
-                    lowLatencyMode: true,
-                    xhrSetup: (xhr) => { xhr.withCredentials = false; }
-                });
-                this.hls.loadSource(url);
-                this.hls.attachMedia(video);
-                this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    video.play().catch(() => {});
-                });
-                this.hls.on(Hls.Events.ERROR, (event, data) => {
-                    if (data.fatal) {
-                        console.warn("HLS Fatal Error:", data.type);
-                        this.handleError();
-                    }
-                });
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = url;
-                video.play().catch(() => {});
-            }
-        } else if (streamTypeUrl.includes('.ts') || streamTypeUrl.includes('.flv')) {
-            if (mpegts.getFeatureList().mse) {
-                this.ts = mpegts.createPlayer({
-                    type: streamTypeUrl.includes('.ts') ? 'mse' : 'flv',
-                    url: url
-                });
-                this.ts.attachMediaElement(video);
-                this.ts.load();
-                this.ts.play().catch(() => this.handleError());
-            }
-        } else {
-            video.src = url;
-            video.play().catch(() => this.handleError());
-        }
+        this.isRetrying = true;
+        console.log("Player: ошибка потока, повторная попытка через 2с...");
+        setTimeout(() => {
+            this.play(this.lastUrl, true);
+        }, 2000);
     },
 
     stop() {
@@ -1627,7 +1551,6 @@ const Player = {
             video.load();
         }
         
-        // Скрываем контейнер плеера и убираем метку активности
         const container = document.getElementById('player-container');
         const layout = document.querySelector('.main-layout');
         if (container) container.style.display = 'none';
