@@ -604,22 +604,9 @@ const App = {
         // Запуск живого обновления прогресса (раз в 30 сек)
         setInterval(() => this.updateProgress(), 30000);
 
-        if (m3u) {
-            // Пытаемся быстро загрузить EPG из кэша IndexedDB
-            const cachedEpg = await DB.load();
-            if (cachedEpg) {
-                this.epg = cachedEpg;
-                this.channels = Parser.m3u(m3u);
-                const gSet = new Set(['Все']);
-                this.channels.forEach(c => { if(c.group) gSet.add(c.group); });
-                this.groups = Array.from(gSet);
-                this.renderGroups();
-                this.renderChannels();
-                this.showScreen('main');
-            } else {
-                // Если в базе пусто, но текст есть — парсим
-                this.loadData();
-            }
+        if (this.sources.m3u.length > 0) {
+            // Если есть источники, запускаем автоматическую загрузку при старте
+            this.loadAllData();
         } else {
             this.showScreen('settings');
         }
