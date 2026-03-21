@@ -8,122 +8,235 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.7.4/dash.all.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #0d1117;
-            --surface: rgba(22, 27, 34, 0.7);
-            --surface-hover: rgba(79, 172, 254, 0.1);
+            --bg: #0f1114;
+            --surface: #1a1d23;
+            --surface-hover: #2a2e37;
             --accent: #4facfe;
-            --text: #e6edf3;
-            --text-muted: #8b949e;
-            --focus-border: #4facfe;
-            --glass: rgba(255, 255, 255, 0.03);
+            --text: #ffffff;
+            --text-muted: #a0a0a0;
+            --focus-border: #ffffff;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
         body { 
             background: var(--bg); 
             color: var(--text-muted); 
-            font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
             overflow: hidden; 
             height: 100vh;
-            background-image: radial-gradient(circle at 50% -20%, #1d2d44 0%, #0d1117 80%);
         }
 
-        /* Красивые скроллбары */
-        .scrollable::-webkit-scrollbar { width: 5px; }
-        .scrollable::-webkit-scrollbar-track { background: transparent; }
+        /* Общие стили для скроллбаров */
+        .scrollable::-webkit-scrollbar { width: 4px; }
         .scrollable::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-        .scrollable::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
-        .selector { cursor: pointer; border: 1px solid transparent; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); position: relative; }
-        .selector.focus { border-color: var(--focus-border); background: var(--surface-hover); transform: translateX(5px); outline: none; box-shadow: 0 0 15px rgba(79, 172, 254, 0.2); }
+        /* Навигация (Пульт) */
+        .selector { cursor: pointer; border: 2px solid transparent; transition: all 0.1s ease-in-out; }
+        .selector.focus { border-color: var(--focus-border); background: transparent; transform: none; z-index: 10; outline: none; }
 
-        .screen { display: none; height: 100vh; width: 100vw; animation: fadeIn 0.3s ease; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        /* Экраны */
+        .screen { display: none; height: 100vh; width: 100vw; }
         .screen.active { display: flex; flex-direction: column; }
 
-        /* Настройки */
-        #screen-settings { padding: 40px; justify-content: center; align-items: center; background: var(--bg); }
-        .settings-container { 
-            width: 100%; max-width: 700px; display: flex; flex-direction: column; gap: 20px; 
-            background: var(--surface); backdrop-filter: blur(20px); padding: 40px; border-radius: 24px; border: 1px solid var(--glass);
-        }
-        .settings-container h1 { font-weight: 800; font-size: 2em; color: #fff; letter-spacing: -1px; margin-bottom: 10px; }
+        /* Экран настроек */
+        #screen-settings { padding: 40px; justify-content: center; align-items: center; background: var(--bg); display: none; }
+        #screen-settings.active { display: flex; }
+        .settings-container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 20px; }
+        .settings-container h1 { font-weight: 300; margin-bottom: 10px; }
         textarea { 
-            width: 100%; height: 160px; background: rgba(0,0,0,0.3); color: #fff; 
-            border: 1px solid var(--glass); padding: 15px; border-radius: 12px; font-family: 'JetBrains Mono', monospace; resize: none; transition: border 0.3s;
+            width: 100%; height: 200px; background: var(--surface); color: #fff; 
+            border: 1px solid #333; padding: 15px; border-radius: 8px; font-family: monospace; resize: none;
         }
-        textarea:focus { border-color: var(--accent); outline: none; }
-        .btn-save { padding: 18px; background: var(--accent); color: #000; border-radius: 12px; text-align: center; font-weight: 800; font-size: 1.1em; text-transform: uppercase; letter-spacing: 1px; }
+        .btn-save { padding: 15px; background: var(--accent); color: #fff; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.2em; }
 
-        /* Шапка */
-        .app-header { 
-            height: 70px; display: flex; align-items: center; padding: 0 30px; 
-            background: rgba(13, 17, 23, 0.8); backdrop-filter: blur(10px); border-bottom: 1px solid var(--glass); flex-shrink: 0; z-index: 100;
-        }
-        .groups-bar { display: flex; gap: 8px; overflow-x: auto; flex: 1; margin: 0 25px; scroll-behavior: smooth; }
+        /* Основной интерфейс (3 колонки) */
+        .app-header { height: 60px; display: flex; align-items: center; padding: 0 20px; background: #000; justify-content: space-between; flex-shrink: 0; }
+        .groups-bar { display: flex; gap: 10px; overflow-x: auto; flex: 1; margin: 0 20px; }
         .groups-bar::-webkit-scrollbar { display: none; }
-        .group-item { padding: 8px 18px; background: var(--glass); border-radius: 12px; white-space: nowrap; font-size: 0.85em; font-weight: 600; transition: all 0.2s; border: 1px solid transparent; }
-        .group-item:hover { background: rgba(255,255,255,0.08); }
-        .group-item.active { background: var(--accent); color: #000; box-shadow: 0 4px 15px rgba(79, 172, 254, 0.4); }
+        .group-item { padding: 6px 15px; background: var(--surface); border-radius: 20px; white-space: nowrap; font-size: 0.9em; }
+        .group-item.active { background: var(--accent); color: #fff; }
 
-        .main-layout { display: flex; flex: 1; overflow: hidden; }
+        .main-layout { display: flex; flex: 1; overflow: hidden; background: var(--bg); position: relative; }
 
-        /* Каналы */
-        .col-channels { width: 22%; border-right: 1px solid var(--glass); display: flex; flex-direction: column; background: rgba(0,0,0,0.1); }
-        .channel-item { display: flex; align-items: center; padding: 14px 20px; gap: 15px; border-bottom: 1px solid var(--glass); }
+        /* Глобальный плеер */
+        #player-container { 
+            background: #000; 
+            display: none; 
+            line-height: 0; 
+            border-bottom: 1px solid #222;
+            z-index: 100;
+        }
+
+        /* Десктопная верстка плеера (над средней колонкой) */
+        @media (min-width: 769px) {
+            #player-container { 
+                position: absolute;
+                top: 0;
+                left: 20%; /* Ширина первой колонки */
+                width: 30%; /* Ширина второй колонки */
+            }
+            /* Создаем отступ в списке передач только когда плеер активен */
+            .main-layout.player-active .col-schedule { 
+                padding-top: calc(30vw * 0.5625); 
+            } 
+        }
+
+        /* Колонка 1: Список каналов (Узкая) */
+        .col-channels { width: 20%; border-right: 1px solid #222; display: flex; flex-direction: column; z-index: 5; }
+        .channel-item { display: flex; align-items: center; padding: 12px; gap: 15px; border-bottom: 1px solid #1c1f24; }
         .ch-logo-container { 
-            width: 44px; height: 44px; position: relative; flex-shrink: 0; 
-            background: var(--glass); border-radius: 10px; overflow: hidden;
-            display: flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; border: 1px solid var(--glass);
+            width: 50px; height: 50px; position: relative; flex-shrink: 0; 
+            background: #333; border-radius: 6px; overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; color: #fff; font-size: 1.2em;
         }
-        .ch-logo { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+        .ch-logo { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            object-fit: contain; background: #000; transition: opacity 0.3s;
+        }
         .ch-info { flex: 1; overflow: hidden; }
-        .ch-name { font-weight: 700; font-size: 1em; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
-        .ch-now { font-size: 0.8em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
-        .ch-progress-bg { width: 100%; height: 2px; background: var(--glass); margin-top: 10px; border-radius: 2px; }
-        .ch-progress-fill { height: 100%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
-        .archive-marker { color: var(--accent); font-size: 1.1em; }
+        .ch-name { font-weight: bold; font-size: 1.1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 8px; color: #d0d0d0; }
+        .ch-now { font-size: 0.85em; color: #ff9800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
+        .ch-progress-bg { width: 100%; height: 3px; background: rgba(255,255,255,0.1); margin-top: 8px; border-radius: 2px; overflow: hidden; }
+        .ch-progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s ease; }
+        .archive-marker { color: #ff9800; font-size: 0.9em; font-weight: normal; }
 
-        /* Расписание и Плеер */
-        .col-schedule { width: 33%; border-right: 1px solid var(--glass); display: flex; flex-direction: column; background: rgba(255,255,255,0.01); }
-        #player-container { width: 100%; background: #000; flex-shrink: 0; position: sticky; top: 0; z-index: 10; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        #main-video { width: 100%; aspect-ratio: 16 / 9; display: block; }
-
-        .prog-item { padding: 18px 25px; border-bottom: 1px solid var(--glass); transition: background 0.2s; }
-        .prog-item.active-now { background: var(--surface-hover); border-left: 3px solid var(--accent); }
-        .day-header { 
-            padding: 12px 25px; background: rgba(0,0,0,0.2); color: var(--accent); 
-            font-size: 0.75em; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; border-bottom: 1px solid var(--glass);
+        /* Колонка 2: Программа передач (Ровно 30% экрана) */
+        .col-schedule { width: 30%; border-right: 1px solid #222; display: flex; flex-direction: column; background: rgba(0,0,0,0.1); z-index: 5; }
+        
+        /* Кнопка остановки */
+        #btn-stop-player {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 20;
+            padding: 5px 12px;
+            background: rgba(244, 67, 54, 0.8);
+            color: white;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            display: none;
         }
-        .prog-time { font-weight: 700; color: #fff; font-size: 0.85em; margin-bottom: 4px; opacity: 0.6; }
-        .prog-title { font-size: 0.95em; line-height: 1.4; color: #d0d0d0; font-weight: 500; }
-        .archive-icon { position: absolute; right: 15px; top: 18px; font-size: 0.65em; color: var(--accent); border: 1px solid var(--accent); padding: 2px 6px; border-radius: 4px; font-weight: 800; }
+        #player-container:hover #btn-stop-player, 
+        #btn-stop-player.focus { display: block; }
 
-        /* Детали */
-        .col-details { width: 45%; background: transparent; }
-        .details-content { padding: 40px; animation: slideUp 0.4s ease; }
-        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        .fanart { width: 200px; float: left; border-radius: 16px; margin: 0 30px 20px 0; box-shadow: 0 20px 40px rgba(0,0,0,0.6); border: 1px solid var(--glass); }
-        .det-title { font-size: 2.2em; font-weight: 800; margin-bottom: 15px; color: #fff; letter-spacing: -1px; }
-        .det-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 25px; }
-        .det-meta span { background: var(--glass); padding: 5px 12px; border-radius: 8px; font-size: 0.8em; font-weight: 600; color: var(--accent); border: 1px solid var(--glass); }
-        
-        .rating-green { background: #238636 !important; color: #fff !important; }
-        .rating-red { background: #da3633 !important; color: #fff !important; }
+        /* HUD Громкости */
+        #volume-hud {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            color: #fff;
+            padding: 20px 30px;
+            border-radius: 15px;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            z-index: 1000;
+            pointer-events: none;
+            border: 1px solid var(--accent);
+        }
+        .vol-bar-bg { width: 150px; height: 6px; background: rgba(255,255,255,0.2); margin-top: 10px; border-radius: 3px; }
+        .vol-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.1s; }
 
-        .det-full-desc { font-size: 1.1em; line-height: 1.7; color: var(--text-muted); margin-top: 30px; }
-        .det-separator { border-top: 1px solid var(--glass); margin: 30px 0; }
+        /* Состояния элементов списка */
+        .channel-item.is-selected, .prog-item.is-selected { 
+            border: 2px solid var(--text-muted) !important; 
+            background: transparent !important;
+        }
+        .channel-item.is-playing { 
+            background: rgba(79, 172, 254, 0.2) !important;
+            border-left: 4px solid var(--accent) !important;
+        }
+        .channel-item.is-playing .ch-name { color: var(--accent); }
+        #main-video { 
+            width: 100%; /* Теперь занимает всю ширину своей 30% колонки */
+            aspect-ratio: 16 / 9; 
+            background: #000;
+            outline: none;
+            display: block;
+        }
+
+        .prog-item { padding: 15px; border-bottom: 1px solid #1c1f24; position: relative; }
+        .prog-item.active-now { background: rgba(79, 172, 254, 0.1); border-left: 4px solid var(--accent); }
+        .day-header { 
+            padding: 10px 15px; 
+            background: rgba(255,255,255,0.03); 
+            color: var(--accent); 
+            font-size: 0.8em; 
+            font-weight: bold; 
+            text-transform: uppercase; 
+            letter-spacing: 1px;
+            border-bottom: 1px solid #222;
+        }
+        .prog-time { font-weight: bold; color: #ff9800; font-size: 0.9em; margin-bottom: 5px; }
+        .prog-title { font-size: 1em; line-height: 1.3; color: #d0d0d0; }
+        .archive-icon { position: absolute; right: 10px; top: 10px; font-size: 0.75em; color: #ff9800; font-weight: bold; border: 1px solid #ff9800; padding: 1px 4px; border-radius: 3px; }
+
+        /* Колонка 3: Описание (Широкая - 50% экрана) */
+        .col-details { width: 50%; display: flex; flex-direction: column; background: var(--bg); }
+        .details-content { padding: 25px; }
+        .fanart { width: 180px; float: left; border-radius: 8px; margin: 0 20px 10px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.5); display: none; }
+        .det-title { font-size: 1.8em; font-weight: bold; margin-bottom: 12px; line-height: 1.2; color: #ff9800; }
+        .det-credits-top { font-size: 0.95em; line-height: 1.5; margin-bottom: 15px; }
+        .det-separator { clear: both; border-top: 1px solid #333; margin: 20px 0; padding-top: 20px; }
+        .det-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; font-size: 0.9em; color: var(--text-muted); font-weight: bold; }
+        .det-meta span { background: rgba(255,255,255,0.05); padding: 3px 8px; border-radius: 4px; }
         
+        /* Подсветка поиска */
+        .search-highlight { 
+            background: #ffeb3b; 
+            color: #000; 
+            padding: 0 2px; 
+            border-radius: 2px; 
+            font-weight: bold;
+            font-style: normal;
+        }
+
+        /* Цвета рейтингов */
+        .rating-green { background: #4caf50 !important; color: #000 !important; }
+        .rating-yellow { background: #ffeb3b !important; color: #000 !important; }
+        .rating-orange { background: #ff9800 !important; color: #000 !important; }
+        .rating-red { background: #f44336 !important; color: #fff !important; }
+
+        .det-full-desc { font-size: 1.05em; line-height: 1.6; color: var(--text-muted); margin-bottom: 20px; white-space: pre-wrap; }
+        .credit-label { color: #ff9800; font-weight: normal; }
+        .credit-value { color: #d0d0d0; }
+
+        .scrollable { overflow-y: auto; flex: 1; }
+
+        /* Адаптация для мобильных устройств */
         @media (max-width: 768px) {
-            .col-channels, .col-schedule, .col-details { width: 100% !important; display: none !important; }
+            .main-layout { flex-direction: column; overflow: hidden; }
+            
+            #player-container { 
+                width: 100%; 
+                position: sticky; 
+                top: 0; 
+            }
+
+            .col-channels, .col-schedule, .col-details { 
+                width: 100% !important; 
+                display: none !important; 
+                border-right: none;
+                flex: 1;
+                overflow-y: auto;
+            }
+            
+            /* Классы для управления видимостью колонок на мобильных */
             .main-layout.view-channels .col-channels { display: flex !important; }
             .main-layout.view-schedule .col-schedule { display: flex !important; }
             .main-layout.view-details .col-details { display: flex !important; }
+            
             #mobile-back { display: block !important; }
-            .app-header { padding: 0 15px; height: 60px; }
+            
+            .groups-bar { margin: 0 10px; }
+            .det-title { font-size: 1.5em; }
+            .fanart { width: 120px; }
         }
     </style>
 </head>
