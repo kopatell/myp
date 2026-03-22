@@ -1488,19 +1488,41 @@ const Player = {
         
         video.onerror = () => this.handleError();
 
-        // Определение типа потока
-        const cleanUrl = url.split('|')[0].split('%7C')[0].toLowerCase();
+        // Определение типа потока и извлечение параметров заголовков
+        const parts = url.split('|');
+        const cleanUrl = parts[0].split('%7C')[0].toLowerCase();
+        const pipePart = parts[1] ? '|' + parts[1] : '';
 
         if (cleanUrl.includes('.mpd')) {
             this.dash = dashjs.MediaPlayer().create();
             this.dash.initialize(video, url, true);
         } else if (cleanUrl.includes('.m3u8')) {
             if (Hls.isSupported()) {
-                this.hls = new Hls({
+                const hlsConfig = {
                     enableWorker: true,
                     lowLatencyMode: true,
                     xhrSetup: (xhr) => { xhr.withCredentials = false; }
-                });
+                };
+
+                // Внедрение "липких" заголовков для всех внутренних запросов
+                if (pipePart) {
+                    class StickyHeaderLoader extends Hls.DefaultConfig.loader {
+                        constructor(config) {
+                            super(config);
+                            const load = this.load.bind(this);
+                            this.load = (context, config, callbacks) => {
+                                if (!context.url.includes('|') && !context.url.includes('%7C')) {
+                                    context.url += pipePart;
+                                }
+                                load(context, config, callbacks);
+                            };
+                        }
+                    }
+                    hlsConfig.pLoader = StickyHeaderLoader;
+                    hlsConfig.fLoader = StickyHeaderLoader;
+                }
+
+                this.hls = new Hls(hlsConfig);
                 this.hls.loadSource(url);
                 this.hls.attachMedia(video);
                 this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
