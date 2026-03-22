@@ -1155,10 +1155,14 @@ const Parser = {
         lines.forEach(line => {
             line = line.trim();
             if (line.startsWith('#EXTINF:')) {
+                let logo = this.attr(line, 'tvg-logo');
+                // Принудительно переводим логотипы на https, чтобы избежать Mixed Content
+                if (logo && logo.startsWith('http:')) logo = logo.replace('http:', 'https:');
+
                 current = {
                     id: this.attr(line, 'tvg-id') || this.attr(line, 'tvg-name'),
                     name: line.split(',').pop().trim(),
-                    logo: this.attr(line, 'tvg-logo'),
+                    logo: logo,
                     group: this.attr(line, 'group-title'),
                     archive: line.includes('catchup="') || line.includes('catchup-days="'),
                     catchupType: this.attr(line, 'catchup'),
@@ -1166,7 +1170,12 @@ const Parser = {
                 };
             } else if (line && !line.startsWith('#')) {
                 if (current) {
-                    current.url = line;
+                    let streamUrl = line;
+                    // Исправляем протокол потока, если сайт на HTTPS
+                    if (location.protocol === 'https:' && streamUrl.startsWith('http:')) {
+                        streamUrl = streamUrl.replace('http:', 'https:');
+                    }
+                    current.url = streamUrl;
                     channels.push(current);
                     current = null;
                 }
