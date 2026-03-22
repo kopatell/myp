@@ -1462,7 +1462,14 @@ const Catchup = {
 /**
  * VIDEO PLAYER ENGINE
  */
-play(url, isRetry = false) {
+const Player = {
+    hls: null,
+    dash: null,
+    ts: null,
+    lastUrl: '',
+    isRetrying: false,
+
+    play(url, isRetry = false) {
         if (!isRetry) this.isRetrying = false;
         
         // Сброс заголовков в бридже перед новой сессией
