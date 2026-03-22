@@ -1100,9 +1100,17 @@ const App = {
 
     highlight(text, q) {
         if (!q || !text) return text;
+        // Сначала экранируем опасные символы HTML
+        let safeText = text.toString()
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+
         const escapedQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const regex = new RegExp(`(${escapedQ})`, 'gi');
-        return text.toString().replace(regex, '<mark class="search-highlight">$1</mark>');
+        return safeText.replace(regex, '<mark class="search-highlight">$1</mark>');
     },
 
     adjustVolume(delta) {
@@ -1296,10 +1304,21 @@ const Nav = {
                 return; 
             }
 
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key)) {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape'].includes(e.key)) {
                 // Если мы в поле ввода - не перехватываем стрелки (кроме Escape)
                 if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') {
                     if (e.key === 'Escape') document.activeElement.blur();
+                    return;
+                }
+
+                // Кнопка Назад (Escape)
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    if (document.getElementById('screen-settings').classList.contains('active')) {
+                        App.showScreen('main'); // Закрыть настройки
+                    } else {
+                        App.goBack(); // Вернуться к списку каналов (для мобильной версии и узких окон)
+                    }
                     return;
                 }
 
@@ -1334,7 +1353,12 @@ const Nav = {
     },
 
     move(key) {
-        if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') {
+        // Блокируем навигацию пультом, если фокус в поле ввода или поиска
+        const isTyping = document.activeElement.tagName === 'TEXTAREA' || 
+                         document.activeElement.tagName === 'INPUT' ||
+                         document.activeElement.isContentEditable;
+                         
+        if (isTyping && key !== 'Escape') {
             return;
         }
 
