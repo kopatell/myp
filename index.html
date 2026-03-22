@@ -1462,16 +1462,10 @@ const Catchup = {
 /**
  * VIDEO PLAYER ENGINE
  */
-const Player = {
-    hls: null,
-    dash: null,
-    ts: null,
-    lastUrl: '',
-    isRetrying: false,
-
-    play(url, isRetry = false) {
+play(url, isRetry = false) {
         if (!isRetry) this.isRetrying = false;
         
+        // Сброс заголовков в бридже перед новой сессией
         window.dispatchEvent(new CustomEvent('iptv-reset-headers'));
 
         this.stop();
@@ -1486,6 +1480,7 @@ const Player = {
         this.lastUrl = url;
         video.onerror = () => this.handleError();
 
+        // Определение типа потока и извлечение параметров заголовков
         const parts = url.split('|');
         const cleanUrl = parts[0].split('%7C')[0].toLowerCase();
         const pipePart = parts[1] ? '|' + parts[1] : '';
@@ -1496,11 +1491,11 @@ const Player = {
         } else if (cleanUrl.includes('.m3u8')) {
             if (Hls.isSupported()) {
                 const hlsConfig = {
-                    enableWorker: false, // ВЫКЛЮЧАЕМ ВОРКЕР ДЛЯ ТЕСТА
-                    lowLatencyMode: true,
-                    xhrSetup: (xhr) => { xhr.withCredentials = false; }
+                    enableWorker: true, // ВКЛЮЧАЕМ ВОРКЕР (для работы sw.js)
+                    lowLatencyMode: true
                 };
 
+                // Внедрение "липких" заголовков для всех внутренних запросов
                 if (pipePart) {
                     class StickyHeaderLoader extends Hls.DefaultConfig.loader {
                         constructor(config) {
@@ -1509,7 +1504,6 @@ const Player = {
                             this.load = (context, config, callbacks) => {
                                 if (!context.url.includes('|') && !context.url.includes('%7C')) {
                                     context.url += pipePart;
-                                    console.log("Segment Request with Headers:", context.url); // ЛОГИРУЕМ ССЫЛКУ
                                 }
                                 load(context, config, callbacks);
                             };
